@@ -1,0 +1,1 @@
+Byakugan shows where your disk space goes. Explore a nested map, compare allocated and logical size, and review file or folder cleanup before it happens. Built with Zig and nanoui for Windows.

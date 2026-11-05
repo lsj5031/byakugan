@@ -57,16 +57,24 @@ pub fn view(s: *App, c: *ui.Context) void {
     defer root.end();
     // The kit draws the overlay; keep background controls out of keyboard,
     // text-input and accessibility activation while its modal is open.
-    const modal = s.location_open or s.location_visible;
+    const modal = s.location_open or s.location_visible or s.cleanup.modal();
     if (s.location_restore_focus) {
         c.focus = s.location_return_focus;
         s.location_restore_focus = false;
     }
+    if (s.cleanup.restore_focus and s.cleanup.work == null) {
+        if (c.focus == 0 or c.focus != s.filter_buf.last_id) c.focus = s.cleanup.return_focus;
+        s.cleanup.restore_focus = false;
+    }
     const input = c.input;
     if (modal) c.input = .{};
     header(s, c);
+    scanNotice(s, c);
+    @import("cleanup_view.zig").notice(&s.cleanup, s, c);
     if (s.model != null) {
+        ui.key(c, "navigation");
         navigation(s, c);
+        ui.key(c, "explorer-body");
         const body = ui.div(c).row().wFull().grow().p(16).pt(0).gap(18).clip();
         map(s, c);
         inspector(s, c);
@@ -78,8 +86,14 @@ pub fn view(s: *App, c: *ui.Context) void {
         c.input = input;
         c.focusable_ids.clearRetainingCapacity();
         c.focused_text = null;
+        // Exclude background subtrees, including inferred text/buttons, from
+        // the accessibility tree while an app modal owns interaction.
+        for (c.nodes.items, 0..) |n, i| {
+            if (n.parent == root.index) ui.access.hide(c, @intCast(i));
+        }
     }
     location.view(s, c);
+    s.cleanup.view(s, c);
 }
 fn header(s: *App, c: *ui.Context) void {
     const row = ui.div(c).row().wFull().h(chrome.header_h).pl(20).pr(20 + chrome.caption_w).gap(12).itemsCenter().border(c.theme.border).borderW(1);
@@ -88,15 +102,19 @@ fn header(s: *App, c: *ui.Context) void {
     ui.text(c, "Byakugan", .{ .size = 20, .weight = .semibold });
     ui.spacer(c);
     if (s.demo) ui.text(c, "Demo", .{ .size = 13, .color = c.theme.muted });
-    const choose = button(c, "Choose location", .{ .size = 14, .variant = .primary, .disabled = s.job != null or s.elevation_launch != null });
+    const choose = button(c, "Choose location", .{ .size = 14, .variant = .primary, .disabled = s.job != null or s.elevation_launch != null or s.cleanup.work != null });
     s.location_return_focus = choose.id;
     if (choose.clicked) {
         s.chooseLocation();
         c.changed = true;
     }
     if (s.job) |j| {
-        if (button(c, "Cancel scan", .{ .size = 14, .variant = .ghost }).clicked) j.cancel.store(true, .release);
-    } else if (s.model != null and button(c, "Refresh", .{ .size = 14, .variant = .ghost, .disabled = s.elevation_launch != null }).clicked) s.rescan();
+        const cancelling = j.cancel.load(.acquire);
+        if (button(c, if (cancelling) "Cancelling…" else "Cancel scan", .{ .size = 14, .variant = .ghost, .disabled = cancelling }).clicked) {
+            j.cancel.store(true, .release);
+            c.changed = true;
+        }
+    } else if (s.model != null and button(c, "Refresh", .{ .size = 14, .variant = .ghost, .disabled = s.elevation_launch != null or s.cleanup.work != null }).clicked) s.rescan();
 }
 fn rootTitle(s: *App) []const u8 {
     const label = s.rootLabel();
@@ -108,7 +126,7 @@ fn navigation(s: *App, c: *ui.Context) void {
     const nav = ui.div(c).column().wFull().px(20).py(12).gap(10);
     defer nav.end();
     const crumbs = ui.div(c).row().wFull().h(32).itemsCenter().gap(4).clip();
-    if (ui.button(c, "Up", .{ .size = 13, .variant = .ghost, .disabled = s.focus == m.root }).clicked) {
+    if (button(c, "Up", .{ .size = 13, .variant = .ghost, .disabled = s.focus == m.root }).clicked) {
         s.setFocus(m.nodes[s.focus].parent);
         c.changed = true;
     }
@@ -134,7 +152,7 @@ fn navigation(s: *App, c: *ui.Context) void {
         const box = ui.div(c).row().maxW(if (node == m.root) 220 else 180).h(32).px(12).itemsCenter().rounded(8).clip().control().hover(c.theme.surface_hover);
         c.addA11y(box.index, .button, title, "", false, true);
         ui.text(c, title, .{ .size = 14, .truncate = .ellipsis });
-        if (box.interaction().clicked) {
+        if (@import("controls.zig").keyboard(c, box.index, box.interaction(), false).clicked) {
             s.setFocus(node);
             c.changed = true;
         }
@@ -145,14 +163,15 @@ fn navigation(s: *App, c: *ui.Context) void {
     const controls = ui.div(c).row().wFull().h(38).gap(12).itemsCenter();
     const field = ui.textField(c, &s.filter_buf, .{ .placeholder = "Filter this folder’s direct children", .width = .{ .px = @min(340, c.size.w - 490) }, .size = 14, .select_all_on_focus = true });
     if (field.changed) c.changed = true;
-    if (s.filter_buf.text().len > 0 and ui.button(c, "Clear", .{ .variant = .ghost, .size = 13 }).clicked) {
+    if (s.filter_buf.text().len > 0 and button(c, "Clear", .{ .variant = .ghost, .size = 13 }).clicked) {
         s.filter_buf.clear();
+        s.filter_buf.focus();
         c.changed = true;
     }
     ui.spacer(c);
     ui.text(c, "Size", .{ .size = 13, .color = c.theme.muted });
     var choice: usize = if (s.metric_allocated) 0 else 1;
-    if (ui.segmented(c, &.{ "Allocated", "Logical" }, &choice)) {
+    if (@import("controls.zig").segmented(c, &.{ "Allocated", "Logical" }, &choice)) {
         s.metric_allocated = choice == 0;
         s.metricChanged();
         c.changed = true;
@@ -218,8 +237,11 @@ fn map(s: *App, c: *ui.Context) void {
     }
     if (s.tiles.items.len == 0) {
         const msg = ui.div(c).column().sizeFull().center().gap(8).p(20);
-        ui.text(c, if (s.query.items.len > 0 and s.entries.items.len == 0) "No matching direct children" else "No space to map", .{ .size = 17, .color = c.theme.muted });
-        ui.text(c, "Empty and zero-byte entries are available in the inspector.", .{ .size = 13, .color = c.theme.muted, .wrap = true });
+        const words = ui.div(c).column().wFull().maxW(360).itemsStart().gap(8);
+        const no_matches = s.query.items.len > 0 and s.entries.items.len == 0;
+        ui.text(c, if (no_matches) "No matching direct children" else "No space to map", .{ .size = 17, .color = c.theme.muted });
+        ui.text(c, if (no_matches) "Try another name or clear the filter." else if (s.entries.items.len == 0) "This folder has no entries to display." else "Empty and zero-byte entries are available in the inspector.", .{ .size = 13, .color = c.theme.muted, .wrap = true });
+        words.end();
         msg.end();
     }
     for (s.tiles.items, 0..) |tile, i| {
@@ -230,6 +252,7 @@ fn map(s: *App, c: *ui.Context) void {
         ui.keyInt(c, i);
         const box = ui.div(c).absolute().offset(r.x, r.y).size(r.w, r.h).rounded(4).bg(col).border(if (selected) .hex(if (c.theme.dark) 0xE6BE79 else 0x946B2D) else col.mix(c.theme.text, 0.12)).borderW(if (selected) 2 else 1).clip().control().hover(col.mix(c.theme.text, 0.05));
         const interaction = box.interaction();
+        c.addA11y(box.index, .button, if (other) "Browse remaining entries" else s.model.?.name(tile.node), sizeText(c, tile.bytes), selected, true);
         if (r.w > 74 and r.h > 24) {
             const label = ui.div(c).column().wFull().p(if (tile.depth == 0) 10 else 7).gap(4);
             const header_row = ui.div(c).row().wFull().gap(8).itemsCenter();
@@ -243,6 +266,7 @@ fn map(s: *App, c: *ui.Context) void {
             label.end();
         }
         if (interaction.clicked) {
+            c.focus = 0;
             if (other) {
                 s.other_parent = tile.parent;
                 s.selected = tile.parent;
@@ -257,10 +281,14 @@ fn map(s: *App, c: *ui.Context) void {
             s.setFocus(tile.node);
             c.changed = true;
         }
+        if (!other and (interaction.right_clicked or interaction.secondary_clicked)) {
+            s.select(tile.node);
+            s.cleanup.contextMenu(s, c, .{ .x = c.input.mouse.x, .y = c.input.mouse.y }, 0);
+        }
         box.end();
     }
     canvas.end();
-    ui.text(c, "Click to inspect · double-click a folder to explore · color follows the top-level folder", .{ .size = 12, .color = c.theme.muted, .truncate = .ellipsis });
+    if (s.tiles.items.len > 0) ui.text(c, "Click to inspect · double-click a folder to explore · color follows the top-level folder", .{ .size = 12, .color = c.theme.muted, .truncate = .ellipsis });
 }
 fn inspector(s: *App, c: *ui.Context) void {
     const m = s.model.?;
@@ -269,14 +297,22 @@ fn inspector(s: *App, c: *ui.Context) void {
     defer panel.end();
     const other = s.other_parent != null and s.selected == s.other_parent.?;
     const node = m.nodes[s.selected];
+    const system_group = node.flags & (model.FLAG_SYSTEM | model.FLAG_SYNTHETIC) == (model.FLAG_SYSTEM | model.FLAG_SYNTHETIC);
     // Keep the list's hit targets still while its selected item's details
     // change; the second click of a double-click must hit the same row.
-    const details = ui.div(c).column().wFull().h(232).gap(8).clip();
+    // A result banner must leave room for at least one content row.
+    const scan_notice: f32 = if (s.failure != .none and s.job == null) 48 else 0;
+    const cleanup_notice: f32 = if (s.cleanup.phase == .result and s.cleanup.message != null) 72 else 0;
+    const details_h = @min(232, @max(112, c.size.h - 600 + 232 - scan_notice - cleanup_notice));
+    const details = ui.div(c).column().wFull().h(details_h).gap(8).clip();
+    ui.keyInt(c, s.selected);
+    const summary = ui.div(c).column().wFull().grow().gap(6).scrollY();
     ui.text(c, if (other) "Other entries" else if (s.selected == s.focus) "Current folder" else "Selection", .{ .size = 12, .color = c.theme.muted });
     ui.text(c, if (other) "Remaining in this folder" else if (s.selected == m.root) rootTitle(s) else m.name(s.selected), .{ .size = 20, .weight = .medium, .truncate = .ellipsis });
-    ui.text(c, s.displayPath(c, s.selected), .{ .size = 12, .color = c.theme.muted, .truncate = .middle });
+    ui.text(c, if (system_group) "NTFS filesystem records" else s.displayPath(c, s.selected), .{ .size = 12, .color = c.theme.muted, .truncate = .middle });
     if (s.query.items.len > 0 and s.entries.items.len == 0) {
         ui.text(c, "No selection matches this filter.", .{ .size = 14, .color = c.theme.muted, .wrap = true });
+        summary.end();
         details.end();
         return;
     }
@@ -290,10 +326,7 @@ fn inspector(s: *App, c: *ui.Context) void {
         ui.textf(c, .{ .size = 12, .color = c.theme.muted }, "{s} logical · {s} allocated", .{ sizeText(c, node.size), sizeText(c, node.allocated) });
         const total = s.size(s.focus);
         ui.textf(c, .{ .size = 12, .color = c.theme.muted }, "{d:.1}% of current folder", .{if (total == 0) @as(f64, 0) else @as(f64, @floatFromInt(bytes)) * 100 / @as(f64, @floatFromInt(total))});
-        if (node.isDirectory() and s.selected != s.focus and button(c, "Explore folder", .{ .size = 14, .variant = .primary }).clicked) {
-            s.setFocus(s.selected);
-            c.changed = true;
-        }
+        if (system_group) ui.text(c, "Included in totals; sparse holes use no disk space.", .{ .size = 12, .color = c.theme.muted, .wrap = true });
         const links = m.countExtraNames(s.selected);
         if (links > 0) {
             ui.textf(c, .{ .size = 12, .color = c.theme.muted }, "{d} extra hard link{s}", .{ links, if (links == 1) "" else "s" });
@@ -304,6 +337,28 @@ fn inspector(s: *App, c: *ui.Context) void {
                 }
             }
         }
+    }
+    summary.end();
+    // Actions have their own measured space: optional metadata scrolls above
+    // them, and cannot clip a button or move the folder-content rows below.
+    if (!other) {
+        ui.key(c, "inspector-actions");
+        const actions = ui.div(c).column().wFull().gap(6).pb(3);
+        const browse = ui.div(c).row().wFull().gap(6);
+        if (node.isDirectory() and s.selected != s.focus and button(c, "Explore folder", .{ .size = 13, .variant = .primary }).clicked) {
+            s.setFocus(s.selected);
+            c.changed = true;
+        }
+        if (!system_group) {
+            const action = button(c, "More…", .{ .size = 13, .disabled = s.job != null or s.cleanup.work != null });
+            if (action.clicked) s.cleanup.contextMenu(s, c, action.rect orelse .{}, action.id);
+        }
+        browse.end();
+        if (!system_group) {
+            const recycle = button(c, "Move to Recycle Bin…", .{ .size = 13, .disabled = s.selected == m.root or s.job != null or s.cleanup.work != null or s.cleanup.stale });
+            if (recycle.clicked) s.cleanup.request(s, c, recycle.id);
+        }
+        actions.end();
     }
     details.end();
     ui.div(c).wFull().h(1).bg(c.theme.border).end();
@@ -316,21 +371,29 @@ fn inspector(s: *App, c: *ui.Context) void {
         ui.text(c, if (node.isDirectory()) "This folder is empty." else "File · no children", .{ .size = 13, .color = c.theme.muted });
     } else {
         ui.keyInt(c, @as(u64, s.inspector_parent) + if (s.other_parent != null) @as(u64, 0x100000000) else 0);
+        const list_id = c.peekId(null);
         var rows = ui.list(c, .{ .count = s.inspector_entries.items.len, .row_height = 46, .scroll_to = s.scroll_to });
+        s.inspector_scroll = c.scroll.get(list_id) orelse 0;
         s.scroll_to = null;
         while (rows.next()) |i| {
             const idx = s.inspector_entries.items[i];
             const row = ui.div(c).column().wFull().h(46).px(6).gap(3).justifyCenter().rounded(4).bg(if (s.selected == idx) c.theme.surface_hover else c.theme.surface).control().hover(c.theme.surface_hover);
             const it = row.interaction();
+            c.addA11y(row.index, .button, m.name(idx), sizeText(c, s.size(idx)), s.selected == idx, true);
             ui.text(c, m.name(idx), .{ .size = 14, .truncate = .ellipsis });
-            ui.text(c, c.print("{s} · {s}", .{ sizeText(c, s.size(idx)), if (m.nodes[idx].isDirectory()) "folder" else "file" }), .{ .size = 12, .color = c.theme.muted });
+            ui.text(c, c.print("{s} · {s}", .{ sizeText(c, s.size(idx)), if (m.nodes[idx].flags & (model.FLAG_SYSTEM | model.FLAG_SYNTHETIC) == (model.FLAG_SYSTEM | model.FLAG_SYNTHETIC)) "NTFS metadata" else if (m.nodes[idx].isDirectory()) "folder" else "file" }), .{ .size = 12, .color = c.theme.muted });
             if (it.clicked) {
+                c.focus = 0;
                 s.selectInspector(idx);
                 c.changed = true;
             }
             if (it.double_clicked) {
                 s.setFocus(idx);
                 c.changed = true;
+            }
+            if (it.right_clicked or it.secondary_clicked) {
+                s.selectInspector(idx);
+                s.cleanup.contextMenu(s, c, .{ .x = c.input.mouse.x, .y = c.input.mouse.y }, 0);
             }
             row.end();
         }
@@ -347,16 +410,20 @@ fn inspector(s: *App, c: *ui.Context) void {
     }
 }
 fn empty(s: *App, c: *ui.Context) void {
-    const box = ui.div(c).column().grow().wFull().center().p(32).gap(14);
+    const box = ui.div(c).column().grow().wFull().center().p(32);
     defer box.end();
+    const message = ui.div(c).column().wFull().maxW(560).itemsStart().gap(14);
+    defer message.end();
     ui.text(c, "See where your space goes", .{ .size = 28, .weight = .medium });
-    if (s.job != null) {
-        ui.text(c, "Scanning… your map will appear when the scan finishes.", .{ .size = 15, .color = c.theme.muted });
+    if (s.job) |j| {
+        ui.text(c, if (j.cancel.load(.acquire)) "Cancelling scan… waiting for the current read to stop." else "Scanning… your map will appear when the scan finishes.", .{ .size = 15, .color = c.theme.muted, .wrap = true });
     } else {
-        ui.text(c, failureTitle(s.failure), .{ .size = 18 });
+        const elevated = if (s.elevation_error) |err| err == error.AlreadyElevated else false;
+        ui.text(c, if (s.failure == .access and elevated) "Drive access denied" else failureTitle(s.failure), .{ .size = 18 });
         ui.text(c, switch (s.failure) {
-            .access => "Open a folder for a scan without administrator rights, or restart elevated for a full NTFS scan.",
+            .access => if (elevated) "Choose a readable folder or another drive." else "Open a folder for a scan without administrator rights, or restart elevated for a full NTFS scan.",
             .not_ntfs => "Choose an NTFS volume, or open a folder to scan its accessible files.",
+            .geometry => "The drive returned invalid NTFS geometry. Choose a folder or another drive.",
             .folder_access => "Choose a folder your account can read.",
             .folder_missing => "The folder no longer exists. Open another folder to continue.",
             .none => "Choose a folder or drive to scan and explore its disk usage.",
@@ -364,12 +431,13 @@ fn empty(s: *App, c: *ui.Context) void {
             else => "Choose a folder or drive to try again.",
         }, .{ .size = 14, .color = c.theme.muted, .wrap = true });
         if (s.failure == .access) {
-            if (elevationMessage(s)) |message| ui.text(c, message, .{ .size = 14, .color = c.theme.muted, .wrap = true });
+            if (elevationMessage(s)) |detail| ui.text(c, detail, .{ .size = 14, .color = c.theme.muted, .wrap = true });
             restartButton(s, c);
         }
     }
 }
 fn restartButton(s: *App, c: *ui.Context) void {
+    if (s.elevation_error) |err| if (err == error.AlreadyElevated) return;
     if (button(c, "Restart as administrator", .{ .size = 13, .variant = .secondary, .disabled = s.elevation_launch != null }).clicked) {
         s.restartElevated();
         c.changed = true;
@@ -391,6 +459,7 @@ fn failureTitle(f: @import("app.zig").Failure) []const u8 {
         .none => "Choose a location to begin",
         .access => "Administrator rights needed for this volume",
         .not_ntfs => "Not an NTFS volume",
+        .geometry => "Invalid NTFS volume geometry",
         .cancelled => "Scan cancelled",
         .failed => "The scan could not finish",
         .folder_access => "Folder is not readable",
@@ -399,20 +468,31 @@ fn failureTitle(f: @import("app.zig").Failure) []const u8 {
         .start => "Scan could not start",
     };
 }
+fn scanNotice(s: *App, c: *ui.Context) void {
+    if (s.model == null or s.failure == .none or s.job != null) return;
+    ui.key(c, "scan-notice");
+    const row = ui.div(c).row().wFull().px(20).py(8).gap(12).itemsCenter().bg(c.theme.surface).border(c.theme.border);
+    defer row.end();
+    const words = ui.div(c).column().grow();
+    if (elevationMessage(s)) |message| ui.text(c, message, .{ .size = 12, .wrap = true }) else ui.textf(c, .{ .size = 12, .wrap = true }, "{s}; previous scan retained", .{failureTitle(s.failure)});
+    words.end();
+    if (s.failure == .access) restartButton(s, c);
+}
 fn status(s: *App, c: *ui.Context) void {
     const bar = ui.div(c).row().wFull().h(36).px(20).gap(10).itemsCenter().border(c.theme.border).borderW(1).clip();
     defer bar.end();
-    if (s.job) |j| {
+    if (s.cleanup.work != null) {
+        ui.text(c, s.cleanup.message orelse "Working…", .{ .size = 12, .color = c.theme.muted });
+    } else if (s.job) |j| {
         const total = j.total.load(.acquire);
         const bytes = j.bytes.load(.acquire);
-        ui.textf(c, .{ .size = 12, .color = c.theme.muted }, "Scanning · {d} {s} · {s}", .{ j.records.load(.acquire), if (j.kind == .folder) "entries found" else "records", sizeText(c, bytes) });
+        ui.textf(c, .{ .size = 12, .color = c.theme.muted }, "{s} · {d} {s} · {s}", .{ if (j.cancel.load(.acquire)) "Cancelling" else "Scanning", j.records.load(.acquire), if (j.kind == .folder) "entries found" else "records", sizeText(c, bytes) });
         if (total > 0) ui.progress(c, @min(1, @as(f32, @floatFromInt(bytes)) / @as(f32, @floatFromInt(total))), .{ .px = 100 });
     } else if (s.model) |m| {
         if (s.failure != .none) {
-            if (elevationMessage(s)) |message| ui.text(c, message, .{ .size = 12, .color = c.theme.danger, .truncate = .ellipsis }) else ui.textf(c, .{ .size = 12, .color = c.theme.danger }, "{s}; previous scan retained", .{failureTitle(s.failure)});
-            if (s.failure == .access) restartButton(s, c);
+            ui.text(c, "Previous scan retained", .{ .size = 12, .color = c.theme.muted });
         } else ui.textf(c, .{ .size = 12, .color = c.theme.muted }, "{s} · {d} files · {d} folders · {d} skipped", .{ if (s.scan_cancelled) "Cancelled; previous scan retained" else if (s.demo) "Demo" else if (s.folder_mode) "Folder scan complete" else "Volume scan complete", s.files, s.folders, m.skipped });
     } else ui.text(c, failureTitle(s.failure), .{ .size = 12, .color = c.theme.muted });
     ui.spacer(c);
-    if (s.failure != .access) ui.text(c, "↑↓ select · Enter explore · Esc up · Ctrl+F filter", .{ .size = 12, .color = c.theme.muted, .truncate = .ellipsis });
+    if (s.model != null and s.job == null and s.cleanup.work == null and s.failure != .access) ui.text(c, "↑↓ select · Enter explore · Esc up · Ctrl+F filter", .{ .size = 12, .color = c.theme.muted, .truncate = .ellipsis });
 }

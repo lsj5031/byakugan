@@ -31,7 +31,8 @@ pub fn build(gpa: std.mem.Allocator) !*model.Model {
     defer b.deinit();
     const root = try b.addRecord(5, 5, 5, 5, ".", true, 0, 0);
 
-    _ = try file(&b, 5, 5, "$MFT", 2_100 * MB, 2_100 * MB);
+    const mft_ref = try file(&b, 5, 5, "$MFT", 2_100 * MB, 2_100 * MB);
+    b.nodes.items[b.records[@intCast(mft_ref)]].flags |= model.FLAG_SYSTEM;
     _ = try file(&b, 5, 5, "pagefile.sys", 16 * GB, 16 * GB);
     _ = try file(&b, 5, 5, "hiberfil.sys", 12 * GB, 12 * GB);
     _ = try file(&b, 5, 5, "swapfile.sys", 4 * GB, 4 * GB);

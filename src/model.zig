@@ -12,6 +12,7 @@ pub const FLAG_DIRECTORY: u8 = 0x01;
 pub const FLAG_ORPHAN: u8 = 0x02;
 pub const FLAG_ROOT: u8 = 0x04;
 pub const FLAG_SYNTHETIC: u8 = 0x08;
+pub const FLAG_SYSTEM: u8 = 0x10;
 
 /// 40 bytes, as the plan budgets: 4 + 4 + 4 + 4 + 2 + 1 + 1 + padding + 8 + 8.
 pub const Node = struct {
@@ -116,6 +117,8 @@ pub const Model = struct {
         var n: usize = 0;
         var cur = idx;
         while (cur != none and cur != self.root and n < chain.len) : (cur = self.nodes[cur].parent) {
+            // Presentation groups are not components of an on-disk path.
+            if (self.nodes[cur].flags & (FLAG_SYNTHETIC | FLAG_SYSTEM) == (FLAG_SYNTHETIC | FLAG_SYSTEM)) continue;
             chain[n] = cur;
             n += 1;
         }
@@ -395,6 +398,25 @@ pub const Builder = struct {
         }
         self.nodes.items[root].parent = root;
         self.nodes.items[orphan].parent = root;
+
+        // Reparent metadata once, before aggregation. All consumers see the
+        // same group and its bytes contribute to the volume exactly once.
+        var system: u32 = none;
+        const base_count = self.nodes.items.len;
+        for (0..base_count) |idx| {
+            if (idx == root or self.nodes.items[idx].flags & FLAG_SYSTEM == 0) continue;
+            if (system == none) {
+                const off: u32 = @intCast(self.names.items.len);
+                try self.names.appendSlice(self.gpa, "System metadata");
+                system = try self.appendNode(.{
+                    .name_off = off,
+                    .name_len = 15,
+                    .flags = FLAG_DIRECTORY | FLAG_SYNTHETIC | FLAG_SYSTEM,
+                    .parent = root,
+                }, 0, none, 0);
+            }
+            self.nodes.items[idx].parent = system;
+        }
 
         // Break any parent cycle that survived: a node whose chain returns to
         // itself an orphan. Uses a stamp array so no clearing pass is needed.

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en" data-composition-variables='[{"id":"ground","type":"color","label":"Ground","default":"#202620"},{"id":"ink","type":"color","label":"Ink","default":"#E8EDE4"},{"id":"accent","type":"color","label":"Accent","default":"#B7CDB0"}]'>
+<head><meta charset="utf-8"><title>Byakugan — see where your space goes</title>
+<script src="assets/vendor/gsap.min.js"></script>
+<script src="assets/audio-rms.js"></script>
+<style>html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:#202620}#root{position:absolute;inset:0}</style>
+</head><body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="25" data-width="1920" data-height="1080" data-fps="30">
+<div id="hook" class="clip" data-composition-id="hook" data-composition-src="compositions/hook.html" data-start="0" data-duration="3" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+<div id="choose" class="clip" data-composition-id="choose" data-composition-src="compositions/choose.html" data-start="3" data-duration="5" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+<div id="explore" class="clip" data-composition-id="explore" data-composition-src="compositions/explore.html" data-start="8" data-duration="9" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+<div id="cleanup" class="clip" data-composition-id="cleanup" data-composition-src="compositions/cleanup.html" data-start="17" data-duration="5" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+<div id="outro" class="clip" data-composition-id="outro" data-composition-src="compositions/outro.html" data-start="22" data-duration="3" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+<audio id="bed" class="clip" src="assets/music/bed.mp3" data-start="0" data-duration="25" data-track-index="2" data-volume="0.25" data-fade-in="0.5" data-fade-out="1.5"></audio>
+<audio id="navigate-sfx" class="clip" src="assets/sfx/select.ogg" data-start="11" data-duration="0.05" data-track-index="3" data-volume="0.16"></audio>
+<audio id="confirm-sfx" class="clip" src="assets/sfx/select.ogg" data-start="18.5" data-duration="0.05" data-track-index="3" data-volume="0.16"></audio>
+</div>
+<script>window.__timelines=window.__timelines||{};window.__timelines.main=gsap.timeline({paused:true});</script>
+</body></html>

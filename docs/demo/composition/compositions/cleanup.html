@@ -1,0 +1,20 @@
+<template>
+<link rel="stylesheet" href="assets/film.css">
+<style>#root{position:absolute;inset:0}</style>
+<div id="root" data-composition-id="cleanup" data-width="1920" data-height="1080">
+<div class="ground"></div>
+<div class="badge"><img class="mark" src="assets/logo.svg" alt="">Byakugan</div>
+<div id="cleanup-copy" class="copy"><p class="eyebrow">03 / REVIEW</p><h1>Review<br>before<br>removing.</h1><p class="detail">Files and folders.<br>One confirmation.<br>No permanent-delete fallback.</p></div>
+<div id="cleanup-screen" class="screen">
+<img id="cleanup-selected" class="shot clip" data-start="0" data-duration="1.5" src="assets/screens/selection.png" alt="Disposable file selection">
+<img id="cleanup-confirm" class="shot clip" data-start="1.5" data-duration="3.5" data-hold="Read the real confirmation and its path before the end card" src="assets/screens/confirm.png" alt="Recycle confirmation with Cancel focused">
+</div>
+<p class="foot">Disposable fixture · confirmation cancelled · no files removed</p>
+</div>
+<script>
+const tl=gsap.timeline({paused:true});
+// beat-locked: scene starts at17.0s, near music strong cue17.02s.
+tl.fromTo('#cleanup-copy',{opacity:0},{opacity:1,duration:0.3},0);
+tl.fromTo('#cleanup-screen',{x:36},{x:0,duration:0.5,ease:'power4.out'},0);
+window.__timelines.cleanup=tl;
+</script></template>

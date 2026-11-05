@@ -1,0 +1,18 @@
+<template>
+<link rel="stylesheet" href="assets/film.css">
+<style>#root{position:absolute;inset:0}.endcard{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;color:#E8EDE4;font-family:ByakuganSans}.endmark{width:124px;height:124px;border-radius:24px;background:#FCFCF9;padding:12px}.endcard h1{font-size:104px}.endcard p{font-size:36px}.endcard .url{font-size:28px;color:#B7CDB0;margin-top:24px}</style>
+<div id="root" data-composition-id="outro" data-width="1920" data-height="1080">
+<div class="ground"></div>
+<div id="outro-card" class="endcard"><img id="outro-mark" class="endmark" src="assets/logo.svg" alt="Partition logo"><h1>Byakugan</h1><p>See where your space goes.</p><p class="url">github.com/lsj5031/byakugan</p></div>
+</div>
+<script>
+const tl=gsap.timeline({paused:true});
+// beat-locked:22.0s landing starts near the22.01s strong cue.
+tl.fromTo('#outro-card',{opacity:0},{opacity:1,duration:0.3},0);
+tl.fromTo('#outro-mark',{scale:0.9},{scale:1,duration:0.5,ease:'power4.out'},0);
+// Subtle, seekable opacity responds to the actual music; reading text stays still.
+for(let frame=0;frame<90;frame++){
+  tl.to('#outro-mark',{opacity:0.88+0.12*window.byakuganRms[660+frame],duration:1/30,ease:'none'},frame/30);
+}
+window.__timelines.outro=tl;
+</script></template>

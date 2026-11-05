@@ -1,0 +1,22 @@
+<template>
+<link rel="stylesheet" href="assets/film.css">
+<style>#root{position:absolute;inset:0}</style>
+<div id="root" data-composition-id="explore" data-width="1920" data-height="1080">
+<div class="ground"></div>
+<div class="badge"><img class="mark" src="assets/logo.svg" alt="">Byakugan</div>
+<div id="explore-copy" class="copy"><p class="eyebrow">02 / EXPLORE</p><h1>Follow the<br>biggest<br>blocks.</h1><p class="detail">Drill into folders.<br>Compare allocated<br>and logical size.</p></div>
+<div id="explore-screen" class="screen">
+<img id="explore-overview" class="shot clip" data-start="0" data-duration="3" src="assets/screens/overview.png" alt="Overview">
+<img id="explore-games" class="shot clip" data-start="3" data-duration="3" src="assets/screens/games.png" alt="Games folder allocated size">
+<img id="explore-logical" class="shot clip" data-start="6" data-duration="3" src="assets/screens/logical.png" alt="Games folder logical size">
+</div>
+<p class="foot">Real app · synthetic demo data</p>
+</div>
+<script>
+const tl=gsap.timeline({paused:true});
+tl.fromTo('#explore-copy',{opacity:0},{opacity:1,duration:0.3},0);
+tl.fromTo('#explore-screen',{scale:0.98},{scale:1,duration:0.55,ease:'power4.out'},0);
+tl.fromTo('#explore-screen',{scale:1.015},{scale:1,duration:0.4,ease:'power3.out',immediateRender:false},3);
+tl.fromTo('#explore-screen',{scale:1.012},{scale:1,duration:0.35,ease:'power3.out',immediateRender:false},6);
+window.__timelines.explore=tl;
+</script></template>

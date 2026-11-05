@@ -98,6 +98,7 @@ pub fn scan(gpa: std.mem.Allocator, source: Source, header_in: mft.VolumeHeader,
     var records_done: u64 = 0;
     var in_use_total: u64 = 0;
     var stream_off: u64 = 0;
+    var diagnostic_budget: u8 = 8;
     while (stream_off < mft_bytes) {
         if (progress.cancelled()) return error.Cancelled;
         const want: usize = @intCast(@min(@as(u64, chunk_len), mft_bytes - stream_off));
@@ -116,7 +117,7 @@ pub fn scan(gpa: std.mem.Allocator, source: Source, header_in: mft.VolumeHeader,
             records_done += 1;
             if (!rh.inUse()) continue;
             in_use_total += 1;
-            try handleRecord(&builder, &header, rec, rh, records_done - 1);
+            try handleRecord(&builder, &header, rec, rh, records_done - 1, &diagnostic_budget);
         }
         stream_off += want;
         progress.update(records_done, stream_off);
@@ -225,8 +226,7 @@ fn mergeAttrList(gpa: std.mem.Allocator, source: Source, header: *mft.VolumeHead
     }
 }
 
-fn handleRecord(builder: *model.Builder, header: *const mft.VolumeHeader, rec: []u8, rh: mft.RecordHeader, ordinal: u64) !void {
-    _ = header;
+fn handleRecord(builder: *model.Builder, header: *const mft.VolumeHeader, rec: []u8, rh: mft.RecordHeader, ordinal: u64, diagnostic_budget: *u8) !void {
     var name_buf: [1024]u8 = undefined;
     var name_len: usize = 0;
     var parent_record: u64 = no_parent;
@@ -239,11 +239,39 @@ fn handleRecord(builder: *model.Builder, header: *const mft.VolumeHeader, rec: [
 
     var attrs = mft.AttrIterator.init(rec, rh);
     while (true) {
-        const maybe = attrs.next() catch {
+        // Diagnostic selection only: accounting below treats all records alike.
+        // At most eight numeric metadata lines per scan; no user names/paths.
+        const diagnose = diagnostic_budget.* > 0 and (ordinal == 8 or (rh.base_ref != 0 and rh.base_ref & 0x0000FFFFFFFFFFFF == 8));
+        const maybe = attrs.next() catch |err| {
             builder.corrupt += 1;
+            if (diagnose) {
+                diagnostic_budget.* -= 1;
+                std.log.warn("NTFS allocation record={d} attribute_error={t}", .{ ordinal, err });
+            }
             break;
         };
         const a = maybe orelse break;
+        // Every non-resident attribute consumes clusters, including $BITMAP
+        // and $ATTRIBUTE_LIST. Resident values already live inside $MFT.
+        if (a.non_resident) {
+            const usage = a.allocation(header.bytes_per_cluster) catch |err| {
+                builder.corrupt += 1;
+                if (diagnose) {
+                    diagnostic_budget.* -= 1;
+                    std.log.warn("NTFS allocation record={d} type={x} flags={x} vcn={d}..{d} mapping_error={t}", .{ ordinal, a.type, a.flags, a.lowest_vcn, a.highest_vcn, err });
+                }
+                continue;
+            };
+            allocated +|= usage.bytes;
+            if (diagnose) {
+                diagnostic_budget.* -= 1;
+                var prefix: [32]u8 = @splat(0);
+                const n = @min(prefix.len, a.runlist.len);
+                @memcpy(prefix[0..n], a.runlist[0..n]);
+                const hex = std.fmt.bytesToHex(prefix, .lower);
+                std.log.info("NTFS allocation record={d} base={d} type={x} named={} flags={x} vcn={d}..{d} cluster={d} header_hint={d} logical={d} physical={d} sparse_clusters={d} runs={d} run_bytes={d} prefix_bytes={d} run_prefix={s}", .{ ordinal, rh.base_ref & 0x0000FFFFFFFFFFFF, a.type, !a.isUnnamed(), a.flags, a.lowest_vcn, a.highest_vcn, header.bytes_per_cluster, a.allocated, a.logical, usage.bytes, usage.sparse_clusters, usage.runs, a.runlist.len, n, hex });
+            }
+        }
         switch (a.type) {
             mft.ATTR_FILE_NAME => {
                 const fn_ = mft.parseFileName(a.value) catch continue;
@@ -260,21 +288,17 @@ fn handleRecord(builder: *model.Builder, header: *const mft.VolumeHeader, rec: [
             },
             mft.ATTR_DATA => {
                 if (a.non_resident) {
-                    allocated +|= a.allocated;
                     if (a.isUnnamed()) logical +|= a.logical;
                 } else if (a.isUnnamed()) {
                     logical +|= a.value.len;
                 }
-            },
-            mft.ATTR_INDEX_ALLOCATION => {
-                if (a.non_resident) allocated +|= a.allocated;
             },
             else => {},
         }
     }
 
     if (rh.base_ref != 0) {
-        try builder.addExtraSizes(rh.base_ref, logical, allocated);
+        try builder.addExtraSizes(rh.base_ref & 0x0000FFFFFFFFFFFF, logical, allocated);
         return;
     }
 
@@ -289,6 +313,9 @@ fn handleRecord(builder: *model.Builder, header: *const mft.VolumeHeader, rec: [
     }
 
     const idx = try builder.addRecord(ordinal, rh.sequence, parent_record, parent_sequence, fmt_name, is_dir, logical, allocated);
+    // NTFS reserves the first 16 records for filesystem metadata. The root
+    // remains the root; $Extend retains its subtree inside the metadata group.
+    if (idx != model.none and ordinal < 16 and ordinal != 5) builder.nodes.items[idx].flags |= model.FLAG_SYSTEM;
 
     // Other names in the same record are hard links. DOS 8.3 aliases are not.
     if (idx != model.none and has_name) {

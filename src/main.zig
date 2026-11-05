@@ -32,6 +32,10 @@ pub fn main(init: std.process.Init) !void {
 fn run(init: std.process.Init) !void {
     try typeface.register();
     const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (@import("normal_launch.zig").requested(args) and try @import("byakugan").volume.elevation.isElevated()) {
+        log.err("normal reopen rejected elevated child before window creation", .{});
+        return error.NormalSessionRequired;
+    }
     var state = App.init(init.gpa, init.io);
     defer state.deinit();
 

@@ -3,6 +3,9 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Offscreen tests save captures here, including on a fresh checkout.
+    b.root.createDirPath(b.graph.io, "artifacts") catch |err|
+        std.debug.panic("cannot create screenshot directory: {s}", .{@errorName(err)});
 
     const lib = b.addModule("byakugan", .{
         .root_source_file = b.path("src/lib.zig"),

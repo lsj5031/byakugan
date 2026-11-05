@@ -1,103 +1,168 @@
 # Byakugan
 
-A native Windows disk analyzer with a nested treemap and a selection inspector.
-The desktop layout follows [DiskTree](https://github.com/tobi/disktree), with
-bundled [Recursive Sans Linear](https://www.recursive.design/) typography.
+**See where your space goes.**
 
-## Run
+A native Windows disk analyzer built with Zig and [nanoui](https://github.com/justrach/nanoui).
+Scan a folder or an NTFS drive, explore a nested treemap, and review file or folder
+cleanup without losing your place.
 
-Build from this directory with Zig 0.17. The local nanoui dependency must be
-beside this project at `../nanoui`.
+[![Watch the 25-second Byakugan demo](docs/media/demo-poster.jpg)](https://github.com/lsj5031/byakugan/raw/refs/heads/main/docs/media/byakugan-25s.mp4)
+
+**[Watch the 25-second demo](https://github.com/lsj5031/byakugan/raw/refs/heads/main/docs/media/byakugan-25s.mp4)** ·
+[Build from source](#build-from-source) · [Controls](#controls) · [How sizes are counted](#how-sizes-are-counted)
+
+The video uses actual app captures, labelled synthetic scan data, and a disposable
+cleanup fixture. No files were recycled during filming. Made with
+[brag](https://github.com/latent-spaces/brag) and Hyperframes; [source and credits](docs/demo/README.md).
+
+## Find the space, then decide what to do
+
+- **Choose the scope.** Walk a folder without elevation, or read the NTFS Master
+  File Table for a whole-drive view. Nothing scans automatically on ordinary launch.
+- **Explore visually.** Rectangle area follows allocated or logical size. Click
+  to inspect; enter a folder to see its children. Breadcrumbs keep your location clear.
+- **Act on files and folders.** Use the inspector or right-click menu to show an
+  item in Explorer, copy its path, or open a recycle confirmation.
+- **Keep your bearings.** Refresh preserves the current folder, filter and inspector
+  scroll. A failed or cancelled replacement scan retains the previous result.
+- **Use the keyboard.** Visible focus, keyboard-accessible controls, and immediate
+  navigation. Light/dark appearance and Windows reduced-motion preferences are supported.
+
+| Light | Dark |
+| --- | --- |
+| ![Light treemap and inspector](docs/media/overview-light.png) | ![Dark treemap and inspector](docs/media/overview-dark.png) |
+
+Screenshots use the built-in synthetic demo, not a scan of a user's files.
+
+## Build from source
+
+Windows x64, Git, and a Zig **0.17** toolchain are required; this revision was
+tested with Zig **0.17.1**. GUI and CLI binaries are built together.
+
+The current Windows integration needs a small nanoui compatibility patch for
+folder selection and reduced motion. Use the pinned revision below, with both
+repositories beside each other. The patch is included so the build does not
+depend on unpublished files in a developer's checkout.
+
+Run in a new parent directory:
 
 ```powershell
-zig build
+git clone https://github.com/lsj5031/byakugan.git
+git clone https://github.com/lsj5031/nanoui.git
+git -C nanoui switch --detach 7d4424b1046f8bbab365b42f61d00f1934d4dcc8
+git -C nanoui apply --check ../byakugan/tools/nanoui-windows.patch
+git -C nanoui apply ../byakugan/tools/nanoui-windows.patch
+Set-Location byakugan
+zig build -j1
+zig build test -j1
 ```
 
-Launch normally to choose a folder or drive:
+Use a fresh nanoui checkout for these commands; do not reapply the patch to an
+already patched or independently modified checkout. See [dependency notes](tools/nanoui-windows.md).
+
+Launch the chooser:
 
 ```powershell
 & .\zig-out\bin\byakugan.exe
 ```
 
-**Choose location** offers **Browse for folder…** and a drive selector with
-an explicit **Scan drive** action. Selecting a drive does not start a scan or
-replace the current result. **Refresh** scans the current location again.
-Ordinary launch opens the chooser without scanning automatically.
-
-`--demo` is optional: it loads synthetic data for previews and testing. It is
-not needed to use the app. To scan a folder directly at startup:
+Or start with a folder or synthetic demo:
 
 ```powershell
 & .\zig-out\bin\byakugan.exe "--folder=$env:USERPROFILE\Downloads"
+& .\zig-out\bin\byakugan.exe --demo
 ```
 
-A folder scan walks accessible entries, skips inaccessible entries and reparse
-points, and reports skipped counts. It is a partial view of that folder, not a
-complete accounting of the volume.
+## Controls
 
-Full NTFS volume scans need administrator rights. The app's access-denied
-screen offers **Restart as administrator**, or launch it from PowerShell:
+| Action | Mouse or keyboard |
+| --- | --- |
+| Choose another location | **Choose location**; selecting a drive still requires **Scan drive** |
+| Inspect an item | Click a tile or inspector row; ↑ / ↓ selects entries |
+| Enter a folder | Double-click, **Explore folder**, or Enter while browsing |
+| Go up | **Up**, a breadcrumb, or Escape while browsing |
+| Filter immediate children | Ctrl+F; **Clear** removes the filter |
+| Change the size measure | **Allocated** / **Logical** |
+| Refresh this scan | **Refresh** or F5 |
+| File/folder actions | Right-click or **More…** |
+| Review recycling | **Move to Recycle Bin…** or Delete while browsing |
+| Navigate controls | Tab / Shift+Tab, then Enter or Space |
+
+The filter matches names of the current folder's **direct children**, not every
+descendant. Matching folders keep their nested maps. **Other** opens entries too
+numerous to draw separately; zero-byte entries remain available in the inspector.
+
+The window supports 900×600 and larger sizes. Drag empty header space to move it,
+double-click to maximize, or resize from its edges.
+
+## Administrator scans and normal reopening
+
+Full NTFS scans require administrator access. Choose **Restart as administrator**
+after an access-denied result, or launch an explicit volume scan:
 
 ```powershell
-Start-Process -FilePath .\zig-out\bin\byakugan.exe -Verb RunAs -ArgumentList '--volume=C:'
+Start-Process .\zig-out\bin\byakugan.exe -Verb RunAs -ArgumentList '--volume=C:'
 ```
 
-Windows asks for elevation. When using the app's restart button, the original
-window closes only when the new process confirms an elevated token and a
-successful read from the selected drive. Cancellation, launch failure, or a
-failed access check leaves the original window available with a recovery
-message. Use **Choose location** to scan somewhere else.
+The original window closes only after the child verifies its elevated token and
+reads the selected drive. Cancelling UAC or failing that check leaves the original
+window available. An already-elevated access failure offers another location
+instead of repeatedly asking for elevation.
 
-## Explore
+Administrator sessions can use cleanup actions. **More… → Reopen normally** is
+optional: Explorer launches a window under the desktop account, scans the containing
+folder and selects the same item. The administrator window stays open. If a normal
+desktop shell is unavailable, reopening reports an error without an elevated fallback.
 
-- Click a tile or inspector entry to select it. Double-click a folder or use
-  **Explore folder** to enter it. Files remain selections.
-- Use **Up** or a breadcrumb to return to an ancestor.
-- **Allocated** measures disk allocation; **Logical** measures content size.
-  Rectangle area follows the selected measure.
-- The filter matches names of the current folder's **direct children**. It
-  does not search every descendant. Matching folders retain their nested maps.
-- Click **Other** to browse entries too numerous to show separately in the map.
-  The inspector also includes zero-byte entries, which have no map area.
-- Use arrow keys to select, Enter to explore, Escape to clear a filter or move
-  up, Ctrl+F to focus the filter, and F5 to refresh. Navigation shortcuts do not
-  intercept typing in the filter.
-- **Cancel scan** stops the current scan. If a previous result exists, the app
-  retains it after a cancellation or a failed replacement scan.
+## Cleanup behavior
 
-The default window is 1440×1000, with a supported minimum of 900×600. Light and
-dark palettes are available through the system appearance at launch. Windows
-Animation effects preferences control reduced motion; analytical navigation
-and filtering update immediately.
+Recycling always asks for confirmation, with **Cancel** focused initially. The
+worker rechecks the captured item's identity and asks Windows for recycle-only
+deletion. It has **no permanent-delete fallback**. Scan roots, protected paths,
+reparse points, non-fixed drives, stale results and changed identities are rejected.
 
-The app owns its single Windows header, including the logo and minimize,
-maximize/restore, and close controls. Drag blank header space to move the window
-or double-click it to maximize; resize using the window edges.
+Progress and outcomes stay inline. After an attempted operation the app refreshes
+the scan; uncertain outcomes explain that partial changes may have occurred.
+Confirmed success offers **Open Recycle Bin**. Space stays used until the bin is
+emptied, and remaining hard links can keep file data allocated.
 
-## Diagnostics
+The scan is a snapshot: contents can change before cleanup. Identity checks reduce
+replacement mistakes but cannot eliminate every last-instant filesystem race.
 
-The GUI writes startup, scan lifecycle, elevation, and error events to
-`%LOCALAPPDATA%\byakugan\byakugan.log`, with a TEMP fallback. It keeps an active
-log and one rotated archive, each capped at 1 MiB of logger output. Events
-include UTC timestamps and process/thread IDs; scans log aggregate counts,
-not file inventories or folder paths.
+## How sizes are counted
 
-Set `BYAKUGAN_LOG` to override the destination, or `off` to disable logging.
-See [logging details](docs/logging.md) for retention, concurrency, and fallback
-behavior. Logs can distinguish an accepted UAC launch from a child that fails
-its access check.
+**Logical** is content size. **Allocated** is disk allocation; sparse holes have
+no physical allocation. NTFS scans count mapped clusters from each nonresident
+attribute extent, including sparse streams that lack the usual sparse flag.
+Reserved filesystem records appear together under **System metadata** and remain
+included in totals.
 
-## Console and tests
+Folder scans walk accessible entries, skip inaccessible entries and reparse points,
+and report skipped counts. They are a partial view, not a complete volume accounting.
+Allocated totals and Windows' used-space figure can differ because of filesystem
+metadata, hard links, inaccessible data and changes during scanning. This is an
+exploration tool, not a filesystem repair utility or a live search index.
+
+## CLI, tests and diagnostics
 
 ```powershell
 & .\zig-out\bin\byakugan-cli.exe --folder "$env:USERPROFILE\Downloads" --allocated --top 20 --no-progress
 zig build test -j1
 ```
 
-The UI tests render offscreen and save representative captures under
-`artifacts/`. Frame tests create an invisible native window to check that the
-system caption is removed, resize/drag hit tests work, and icons are assigned.
-The suites do not drive the real desktop or trigger UAC prompts.
+The tests cover parsing/accounting, logging, offscreen interactions and invisible
+native window chrome. Captures are written to `artifacts/`. They do not drive the
+real desktop or trigger UAC; passing them is not proof of a successful live recycle.
 
-The bundled font files are unmodified upstream static faces in weights 400,
-500, and 600. Their SIL Open Font License and provenance are in `src/fonts/`.
+Logs go to `%LOCALAPPDATA%\byakugan\byakugan.log`, with TEMP fallback and one rotated
+archive. Each file is capped at 1 MiB of logger output. Events include timestamps,
+process/thread IDs and aggregate scan counts, not file inventories or folder paths.
+Set `BYAKUGAN_LOG` to a destination or `off`. See [logging details](docs/logging.md).
+
+## Credits
+
+The exploration layout is inspired by [DiskTree](https://github.com/tobi/disktree).
+Typography is [Recursive Sans Linear](https://www.recursive.design/), bundled under
+the [SIL Open Font License](src/fonts/LICENSE.txt). The Partition mark is the app's
+shared header, window and executable identity. Demo music: Sascha Ende,
+[ende.app](https://ende.app/en), CC BY 4.0; [full media credits](docs/demo/README.md).

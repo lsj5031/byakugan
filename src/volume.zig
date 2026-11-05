@@ -60,6 +60,7 @@ const GetDiskFreeSpaceExW = struct {
 pub const Error = error{
     AccessDenied,
     NotNtfs,
+    InvalidGeometry,
     NotFound,
     OpenFailed,
     ReadFailed,
@@ -67,9 +68,45 @@ pub const Error = error{
     UnexpectedEof,
 };
 
+/// NTFS_VOLUME_DATA_BUFFER uses LARGE_INTEGER for both signed geometry and
+/// the opaque serial. The serial's high bit is data, not a negative count.
+fn parseVolumeData(data: []const u8) Error!mft.VolumeHeader {
+    if (data.len < 96) return error.InvalidGeometry;
+    const sector = std.mem.readInt(u32, data[40..44], .little);
+    const cluster = std.mem.readInt(u32, data[44..48], .little);
+    const record = std.mem.readInt(u32, data[48..52], .little);
+    const sectors = std.mem.readInt(i64, data[8..16], .little);
+    const clusters = std.mem.readInt(i64, data[16..24], .little);
+    const valid = std.mem.readInt(i64, data[56..64], .little);
+    const mft_lcn = std.mem.readInt(i64, data[64..72], .little);
+    const mirror = std.mem.readInt(i64, data[72..80], .little);
+    if (sector < 512 or !std.math.isPowerOfTwo(sector) or
+        cluster < sector or !std.math.isPowerOfTwo(cluster) or
+        record < 256 or record > 65536 or !std.math.isPowerOfTwo(record) or
+        sectors <= 0 or clusters <= 0 or valid <= 0 or
+        mft_lcn < 0 or mft_lcn >= clusters or mirror < 0 or mirror >= clusters)
+        return error.InvalidGeometry;
+    const capacity = std.math.mul(u64, @intCast(clusters), cluster) catch return error.InvalidGeometry;
+    const sector_bytes = std.math.mul(u64, @intCast(sectors), sector) catch return error.InvalidGeometry;
+    if (capacity > sector_bytes or capacity > std.math.maxInt(i64) or valid > capacity)
+        return error.InvalidGeometry;
+    return .{
+        .bytes_per_sector = sector,
+        .bytes_per_cluster = cluster,
+        .record_size = record,
+        .mft_lcn = @intCast(mft_lcn),
+        .mft_valid_len = @intCast(valid),
+        .mft2_lcn = @intCast(mirror),
+        .total_clusters = @intCast(clusters),
+        .volume_bytes = capacity,
+        .serial = std.mem.readInt(u64, data[0..8], .little),
+    };
+}
+
 pub const Volume = struct {
     gpa: std.mem.Allocator,
     handle: windows.HANDLE,
+    letter: u8,
     header: mft.VolumeHeader,
     sector: u32,
     scratch: []u8 = &.{},
@@ -80,21 +117,21 @@ pub const Volume = struct {
         const h = CreateFileW(@ptrCast(&path), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, null, OPEN_EXISTING, 0, null);
         if (h == windows.INVALID_HANDLE_VALUE) {
             const e = windows.GetLastError();
-            log.warn("raw-volume read-only open failed win32={d}", .{@backingInt(e)});
+            log.warn("raw-volume drive={c}: read-only open failed win32={d}", .{ letter, @backingInt(e) });
             return if (e == .ACCESS_DENIED) error.AccessDenied else error.OpenFailed;
         }
-        log.info("raw-volume read-only open succeeded", .{});
+        log.info("raw-volume drive={c}: read-only open succeeded", .{letter});
         const self = gpa.create(Volume) catch {
             windows.CloseHandle(h);
             return error.OutOfMemory;
         };
-        self.* = .{ .gpa = gpa, .handle = h, .header = .{}, .sector = 512 };
+        self.* = .{ .gpa = gpa, .handle = h, .letter = letter, .header = .{}, .sector = 512 };
         errdefer self.close();
         self.queryHeader() catch |err| {
-            log.warn("raw-volume geometry failed {t}", .{err});
+            log.warn("raw-volume drive={c}: geometry failed {t}", .{ letter, err });
             return err;
         };
-        log.info("raw-volume NTFS geometry verified sector={d} cluster={d} record={d}", .{ self.header.bytes_per_sector, self.header.bytes_per_cluster, self.header.record_size });
+        log.info("raw-volume drive={c}: NTFS geometry verified sector={d} cluster={d} record={d}", .{ letter, self.header.bytes_per_sector, self.header.bytes_per_cluster, self.header.record_size });
         return self;
     }
 
@@ -102,29 +139,13 @@ pub const Volume = struct {
         var vdb: [96]u8 align(8) = @splat(0);
         var got: u32 = 0;
         const ok = DeviceIoControl(self.handle, FSCTL_GET_NTFS_VOLUME_DATA, null, 0, &vdb, vdb.len, &got, null);
-        if (ok != 0 and got >= 96) {
-            const res_per_sector = std.mem.readInt(u32, vdb[40..44], .little);
-            const res_per_cluster = std.mem.readInt(u32, vdb[44..48], .little);
-            const res_record = std.mem.readInt(u32, vdb[48..52], .little);
-            if (res_per_sector >= 512 and res_per_cluster >= res_per_sector and res_record >= 256) {
-                self.header = .{
-                    .bytes_per_sector = res_per_sector,
-                    .bytes_per_cluster = res_per_cluster,
-                    .record_size = res_record,
-                    .mft_lcn = @intCast(std.mem.readInt(i64, vdb[64..72], .little)),
-                    .mft_valid_len = @intCast(std.mem.readInt(i64, vdb[56..64], .little)),
-                    .mft2_lcn = @intCast(std.mem.readInt(i64, vdb[72..80], .little)),
-                    .total_clusters = @intCast(std.mem.readInt(i64, vdb[16..24], .little)),
-                    .volume_bytes = @as(u64, @intCast(std.mem.readInt(i64, vdb[16..24], .little))) * res_per_cluster,
-                    .serial = @intCast(std.mem.readInt(i64, vdb[0..8], .little)),
-                };
-                self.sector = res_per_sector;
-                return;
-            }
-            return error.NotNtfs;
+        if (ok != 0) {
+            self.header = try parseVolumeData(vdb[0..@min(got, vdb.len)]);
+            self.sector = self.header.bytes_per_sector;
+            return;
         }
         const e = windows.GetLastError();
-        if (ok == 0) log.warn("raw-volume NTFS geometry ioctl failed win32={d}", .{@backingInt(e)});
+        log.warn("raw-volume drive={c}: NTFS geometry ioctl failed win32={d}", .{ self.letter, @backingInt(e) });
         if (e == .ACCESS_DENIED) return error.AccessDenied;
         // ReFS, BitLocker and FAT do not answer this ioctl. The boot sector
         // is the documented fallback, and says "not NTFS" quickly.
@@ -302,9 +323,55 @@ fn verifyScanPermission(letter: u8) !void {
     const n = try vol.readAt(offset, &signature);
     if (n != signature.len) return error.UnexpectedEof;
     if (!std.mem.eql(u8, &signature, "FILE")) return error.NotNtfs;
-    log.info("elevation child first MFT record read verified", .{});
+    log.info("elevation child drive={c}: first MFT record read verified", .{letter});
 }
 
 test {
     _ = elevation;
+}
+
+test "NTFS geometry preserves high-bit serials and rejects invalid signed geometry" {
+    var data: [96]u8 = @splat(0);
+    std.mem.writeInt(i64, data[8..16], 2048, .little);
+    std.mem.writeInt(i64, data[16..24], 256, .little);
+    std.mem.writeInt(u32, data[40..44], 512, .little);
+    std.mem.writeInt(u32, data[44..48], 4096, .little);
+    std.mem.writeInt(u32, data[48..52], 1024, .little);
+    std.mem.writeInt(i64, data[56..64], 8192, .little);
+    std.mem.writeInt(i64, data[64..72], 4, .little);
+    std.mem.writeInt(i64, data[72..80], 128, .little);
+    // Actual C: and D: serials obtained with read-only FILE_ID_INFO metadata.
+    for ([_]u64{ 0xa076329e7632755e, 0x14a4cf11a4cef470, 0, 0xffffffffffffffff }) |serial| {
+        std.mem.writeInt(u64, data[0..8], serial, .little);
+        const header = try parseVolumeData(&data);
+        try std.testing.expectEqual(serial, header.serial);
+        try std.testing.expectEqual(@as(u64, 1048576), header.volume_bytes);
+        try std.testing.expectEqual(@as(u64, 8), header.recordCount());
+        try std.testing.expectEqual(@as(u64, 4), header.mft_lcn);
+        try std.testing.expectEqual(@as(u64, 128), header.mft2_lcn);
+    }
+    const valid = data;
+    for ([_]usize{ 8, 16, 56, 64, 72 }) |offset| {
+        data = valid;
+        std.mem.writeInt(i64, data[offset..][0..8], -1, .little);
+        try std.testing.expectError(error.InvalidGeometry, parseVolumeData(&data));
+    }
+    for ([_]usize{ 8, 16, 56 }) |offset| {
+        data = valid;
+        std.mem.writeInt(i64, data[offset..][0..8], 0, .little);
+        try std.testing.expectError(error.InvalidGeometry, parseVolumeData(&data));
+    }
+    data = valid;
+    std.mem.writeInt(i64, data[64..72], 256, .little);
+    try std.testing.expectError(error.InvalidGeometry, parseVolumeData(&data));
+    data = valid;
+    std.mem.writeInt(i64, data[16..24], std.math.maxInt(i64), .little);
+    try std.testing.expectError(error.InvalidGeometry, parseVolumeData(&data));
+    data = valid;
+    std.mem.writeInt(i64, data[56..64], 1048577, .little);
+    try std.testing.expectError(error.InvalidGeometry, parseVolumeData(&data));
+    data = valid;
+    std.mem.writeInt(u32, data[44..48], 3000, .little);
+    try std.testing.expectError(error.InvalidGeometry, parseVolumeData(&data));
+    try std.testing.expectError(error.InvalidGeometry, parseVolumeData(valid[0..95]));
 }

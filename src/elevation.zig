@@ -48,6 +48,7 @@ extern "kernel32" fn CreateEventW(attrs: ?*w.SECURITY_ATTRIBUTES, manual: i32, i
 extern "kernel32" fn OpenEventW(access: u32, inherit: i32, name: [*:0]const u16) callconv(.winapi) ?w.HANDLE;
 extern "kernel32" fn SetEvent(handle: w.HANDLE) callconv(.winapi) i32;
 extern "kernel32" fn WaitForMultipleObjects(count: u32, handles: [*]const w.HANDLE, all: i32, ms: u32) callconv(.winapi) u32;
+extern "kernel32" fn GetExitCodeProcess(process: w.HANDLE, code: *u32) callconv(.winapi) i32;
 extern "kernel32" fn GetTickCount64() callconv(.winapi) u64;
 extern "kernel32" fn LocalFree(memory: ?*anyopaque) callconv(.winapi) ?*anyopaque;
 extern "advapi32" fn ConvertStringSecurityDescriptorToSecurityDescriptorW(text: [*:0]const u16, revision: u32, descriptor: *?*anyopaque, size: ?*u32) callconv(.winapi) i32;
@@ -96,6 +97,13 @@ pub const Launch = struct {
         const result = WaitForMultipleObjects(handles.len, &handles, 0, 0);
         const status = classifyWait(result, GetTickCount64() -| self.started) catch |err| {
             if (result == 0xffffffff) winError("WaitForMultipleObjects");
+            if (err == error.ChildExited) {
+                var code: u32 = 0;
+                if (GetExitCodeProcess(self.process, &code) != 0)
+                    log.err("elevation child exited code={d}", .{code})
+                else
+                    winError("GetExitCodeProcess");
+            }
             log.err("elevation handoff {t}", .{err});
             return err;
         };
@@ -167,7 +175,7 @@ fn createEvent(nonce: []const u8, suffix: u8) Error!w.HANDLE {
 pub fn start(letter: u8) Error!Start {
     if (builtin.os.tag != .windows) return error.UnsupportedPlatform;
     if (!std.ascii.isAlphabetic(letter)) return error.InvalidVolume;
-    log.info("elevation restart requested", .{});
+    log.info("elevation restart requested drive={c}:", .{letter});
     if (try isElevated()) return error.AlreadyElevated;
     var random: [16]u8 = undefined;
     if (BCryptGenRandom(null, &random, random.len, 2) != 0) return error.HandoffFailed;
@@ -255,7 +263,7 @@ pub fn accept(argv: []const []const u8, comptime verify: fn (u8) anyerror!void) 
     defer w.CloseHandle(abandoned);
     const wait = [_]w.HANDLE{abandoned};
     if (WaitForMultipleObjects(1, &wait, 0, 0) != 258) return error.HandoffFailed;
-    log.info("elevation child validating token and raw-volume access", .{});
+    log.info("elevation child validating token and raw-volume access drive={c}:", .{req.letter});
     if (!try isElevated()) return error.ChildRejected;
     verify(req.letter) catch |err| {
         log.err("elevation child volume check failed {t}", .{err});

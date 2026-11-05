@@ -82,6 +82,7 @@ pub const RecordHeader = struct {
     flags: u16,
     used: u32,
     allocated: u32,
+    /// Full reference, including sequence: an extension of record 0 is nonzero.
     base_ref: u64,
 
     pub fn inUse(h: RecordHeader) bool {
@@ -121,7 +122,7 @@ pub fn parseRecord(buf: []u8, record_size: u32, sector_size: u32) ParseError!Rec
         .flags = std.mem.readInt(u16, buf[0x16..0x18], .little),
         .used = std.mem.readInt(u32, buf[0x18..0x1C], .little),
         .allocated = std.mem.readInt(u32, buf[0x1C..0x20], .little),
-        .base_ref = std.mem.readInt(u64, buf[0x20..0x28], .little) & 0x0000FFFFFFFFFFFF,
+        .base_ref = std.mem.readInt(u64, buf[0x20..0x28], .little),
     };
 }
 
@@ -129,10 +130,15 @@ pub const Attr = struct {
     type: u32,
     len: u32,
     non_resident: bool,
+    flags: u16 = 0,
+    lowest_vcn: u64 = 0,
+    highest_vcn: u64 = 0,
     name: []const u8,
     /// Resident value, or empty for a non-resident attribute.
     value: []const u8,
-    /// Non-resident stream sizes.
+    /// Header totals, valid only in the extent starting at VCN 0.
+    /// `allocated` is a header hint, not physical usage: unflagged sparse
+    /// streams such as $BadClus:$Bad can include holes in this number.
     logical: u64 = 0,
     allocated: u64 = 0,
     initialized: u64 = 0,
@@ -141,7 +147,37 @@ pub const Attr = struct {
     pub fn isUnnamed(a: Attr) bool {
         return a.name.len == 0;
     }
+
+    /// Count this extent's actual mapped clusters regardless of attribute flags.
+    /// Sparse runs also represent compression padding; neither occupies disk.
+    /// Continuations own their mapping pairs, but not the stream's header totals.
+    pub fn allocation(a: Attr, cluster_bytes: u32) ParseError!Allocation {
+        var result = Allocation{};
+        var covered: u64 = 0;
+        var it = RunIterator{ .data = a.runlist };
+        while (try it.next()) |run| {
+            covered = std.math.add(u64, covered, run.clusters) catch return error.BadRunlist;
+            result.runs += 1;
+            if (run.lcn) |lcn| {
+                if (lcn < 0) return error.BadRunlist;
+                const bytes = std.math.mul(u64, run.clusters, cluster_bytes) catch return error.BadRunlist;
+                result.bytes = std.math.add(u64, result.bytes, bytes) catch return error.BadRunlist;
+            } else {
+                result.sparse_clusters = std.math.add(u64, result.sparse_clusters, run.clusters) catch return error.BadRunlist;
+            }
+        }
+        // An empty non-resident stream uses HighestVcn = -1. Otherwise the
+        // mapping pairs must cover exactly this segment, not the whole stream.
+        const expected = if (a.lowest_vcn == 0 and a.highest_vcn == std.math.maxInt(u64)) 0 else blk: {
+            if (a.highest_vcn < a.lowest_vcn) return error.BadRunlist;
+            break :blk std.math.add(u64, a.highest_vcn - a.lowest_vcn, 1) catch return error.BadRunlist;
+        };
+        if (covered != expected) return error.BadRunlist;
+        return result;
+    }
 };
+
+pub const Allocation = struct { bytes: u64 = 0, sparse_clusters: u64 = 0, runs: u32 = 0 };
 
 pub const AttrIterator = struct {
     buf: []const u8,
@@ -169,6 +205,7 @@ pub const AttrIterator = struct {
         const at = self.off;
         self.off += len;
         const nonresident = self.buf[at + 8] != 0;
+        const flags = std.mem.readInt(u16, self.buf[at + 12 ..][0..2], .little);
         const name_len = self.buf[at + 9];
         const name_off = std.mem.readInt(u16, self.buf[at + 10 ..][0..2], .little);
         var name: []const u8 = &.{};
@@ -191,17 +228,25 @@ pub const AttrIterator = struct {
             };
         }
         if (len < 64) return error.BadAttribute;
+        const lowest_vcn = std.mem.readInt(u64, self.buf[at + 16 ..][0..8], .little);
+        const extended = flags & 0x8001 != 0;
+        const header_len: u16 = if (extended and lowest_vcn == 0) 72 else 64;
         const run_off = std.mem.readInt(u16, self.buf[at + 32 ..][0..2], .little);
-        if (run_off >= len) return error.BadAttribute;
+        if (run_off < header_len or run_off >= len) return error.BadAttribute;
         return .{
             .type = t,
             .len = len,
             .non_resident = true,
+            .flags = flags,
+            .lowest_vcn = lowest_vcn,
+            .highest_vcn = std.mem.readInt(u64, self.buf[at + 24 ..][0..8], .little),
             .name = name,
             .value = &.{},
-            .allocated = std.mem.readInt(u64, self.buf[at + 40 ..][0..8], .little),
-            .logical = std.mem.readInt(u64, self.buf[at + 48 ..][0..8], .little),
-            .initialized = std.mem.readInt(u64, self.buf[at + 56 ..][0..8], .little),
+            // Linux ntfs3 attr_ondisk_size: total_size for sparse/compressed,
+            // alloc_size otherwise. Continuation extents do not own totals.
+            .allocated = if (lowest_vcn != 0) 0 else std.mem.readInt(u64, self.buf[at + @as(u32, if (extended) 64 else 40) ..][0..8], .little),
+            .logical = if (lowest_vcn != 0) 0 else std.mem.readInt(u64, self.buf[at + 48 ..][0..8], .little),
+            .initialized = if (lowest_vcn != 0) 0 else std.mem.readInt(u64, self.buf[at + 56 ..][0..8], .little),
             .runlist = self.buf[at + run_off .. at + len],
         };
     }
@@ -260,7 +305,7 @@ pub const RunIterator = struct {
     lcn: i64 = 0,
 
     pub fn next(self: *RunIterator) ParseError!?Run {
-        if (self.pos >= self.data.len) return null;
+        if (self.pos >= self.data.len) return error.BadRunlist;
         const header = self.data[self.pos];
         if (header == 0) return null;
         self.pos += 1;
@@ -289,7 +334,7 @@ pub const RunIterator = struct {
                 delta = @bitCast(raw);
             }
             self.pos += off_bytes;
-            self.lcn += delta;
+            self.lcn = std.math.add(i64, self.lcn, delta) catch return error.BadRunlist;
         }
         if (length == 0) return error.BadRunlist;
         return .{ .lcn = if (sparse) null else self.lcn, .clusters = length };
@@ -314,8 +359,10 @@ pub fn appendMftRuns(loc: *MftLocation, attr: Attr) ParseError!void {
         loc.runs[loc.count] = run;
         loc.count += 1;
     }
-    loc.total = attr.logical;
-    loc.has_total = true;
+    if (attr.lowest_vcn == 0) {
+        loc.total = attr.logical;
+        loc.has_total = true;
+    }
 }
 
 test "boot sector positive clusters per record" {

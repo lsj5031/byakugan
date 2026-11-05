@@ -1,0 +1,14 @@
+@font-face{font-family:ByakuganSans;src:url('fonts/RecursiveSansLnrSt-Regular.ttf');font-weight:400}
+@font-face{font-family:ByakuganSans;src:url('fonts/RecursiveSansLnrSt-SemiBold.ttf');font-weight:600}
+*{box-sizing:border-box;margin:0}
+.ground{position:absolute;inset:0;background:var(--ground,#202620)}
+.copy{position:absolute;left:96px;top:240px;width:392px;color:var(--ink,#E8EDE4);font-family:ByakuganSans}
+.eyebrow{font-size:28px;letter-spacing:1px;color:var(--accent,#B7CDB0);margin-bottom:28px}
+h1{font-size:64px;font-weight:600;line-height:1.12;letter-spacing:-2.4px}
+.detail{font-size:28px;line-height:1.5;margin-top:30px;color:var(--accent,#B7CDB0)}
+.screen{position:absolute;left:540px;top:114px;width:1278px;height:852px;border-radius:16px;overflow:hidden;box-shadow:0 18px 44px #0005}
+.shot{position:absolute;inset:0;width:1278px;height:852px;object-fit:contain}
+.foot{position:absolute;left:96px;bottom:60px;font:28px ByakuganSans;color:var(--accent,#B7CDB0)}
+.badge{position:absolute;left:96px;top:105px;display:flex;align-items:center;gap:14px;font:600 28px ByakuganSans;color:var(--ink,#E8EDE4)}
+.mark{width:48px;height:48px;background:#FCFCF9;border-radius:9px;padding:4px}
+.cursor{position:absolute;width:30px;height:40px;z-index:5;pointer-events:none}

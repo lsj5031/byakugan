@@ -1,0 +1,571 @@
+diff --git a/src/ui/context_hooks.zig b/src/ui/context_hooks.zig
+index 03000f1..f8c2f66 100644
+--- a/src/ui/context_hooks.zig
++++ b/src/ui/context_hooks.zig
+@@ -278,6 +278,10 @@ pub fn animate(c: *Context, id: u64, salt: u32, target: f32, speed: f32) f32 {
+     }
+     const a = gop.value_ptr;
+     a.frame = c.frame;
++    if (c.reduced_motion or c.reduce_motion) {
++        a.value = target;
++        return target;
++    }
+     const k = 1 - @exp(-speed * @min(c.dt, 0.1));
+     a.value += (target - a.value) * k;
+     if (@abs(target - a.value) < 0.002) a.value = target else c.animating = true;
+diff --git a/src/ui/tests_motion.zig b/src/ui/tests_motion.zig
+index 92dd8d6..ca787f0 100644
+--- a/src/ui/tests_motion.zig
++++ b/src/ui/tests_motion.zig
+@@ -217,3 +217,83 @@ test "keyframes play a pass, then back with yoyo, and stop at the end" {
+     try testing.expectEqual(@as(f32, 0), s.spin.x);
+     try testing.expect(!s.spin.animating);
+ }
++
++const LegacyMotion = struct {
++    target: f32 = 0,
++    value: f32 = 0,
++
++    fn view(s: *LegacyMotion, c: *ui.Context) void {
++        s.value = c.animate(42, 7, s.target, 18);
++    }
++};
++
++test "legacy animation snaps under either motion flag and resumes from the snapped value" {
++    inline for (.{ "reduced_motion", "reduce_motion" }) |flag| {
++        var s: LegacyMotion = .{};
++        var t: ui.Tester = undefined;
++        try t.init(testing.allocator, .init(&s, LegacyMotion.view), .{});
++        defer t.deinit();
++        s.target = 10;
++        t.frame();
++        try testing.expect(s.value > 0 and s.value < 10 and t.ctx.animating);
++        // Changing the preference interrupts an animation already in flight.
++        @field(t.ctx, flag) = true;
++        t.frame();
++        try testing.expectEqual(@as(f32, 10), s.value);
++        try testing.expect(!t.ctx.animating);
++        s.target = -4;
++        t.frame();
++        try testing.expectEqual(@as(f32, -4), s.value);
++        try testing.expect(!t.ctx.animating);
++        @field(t.ctx, flag) = false;
++        t.frame();
++        try testing.expectEqual(@as(f32, -4), s.value);
++        try testing.expect(!t.ctx.animating);
++        s.target = 2;
++        t.frame();
++        try testing.expect(s.value > -4 and s.value < 2 and t.ctx.animating);
++        t.settle(2);
++        try testing.expectEqual(@as(f32, 2), s.value);
++        try testing.expect(!t.ctx.animating);
++    }
++}
++
++const LegacyButton = struct {
++    clicks: u32 = 0,
++    fn view(s: *LegacyButton, c: *ui.Context) void {
++        if (ui.button(c, "Press", .{ .variant = .primary }).clicked) s.clicks += 1;
++    }
++};
++
++test "legacy button keeps press color without spatial movement under either motion flag" {
++    inline for (.{ "reduced_motion", "reduce_motion" }) |flag| {
++        var s: LegacyButton = .{};
++        var t: ui.Tester = undefined;
++        try t.init(testing.allocator, .init(&s, LegacyButton.view), .{ .scale = 1 });
++        defer t.deinit();
++        const label = t.findText("Press").?;
++        t.moveTo(label.x + label.w / 2, label.y + label.h / 2);
++        t.settle(2);
++        const button = t.ctx.a11y_items.items[0].node_index;
++        const resting = t.ctx.node(button).style.background.?;
++        t.ctx.pointerDown();
++        t.frame();
++        try testing.expect(t.ctx.node(button).style.offset.y > 0);
++        @field(t.ctx, flag) = true;
++        t.frame();
++        try testing.expectEqual(@as(f32, 0), t.ctx.node(button).style.offset.y);
++        try testing.expectEqual(label.y, t.findText("Press").?.y);
++        const pressed = t.ctx.node(button).style.background.?;
++        try testing.expect(pressed.b < resting.b);
++        try testing.expect(!t.ctx.animating);
++        t.ctx.pointerUp();
++        t.frame();
++        try testing.expectEqual(@as(u32, 1), s.clicks);
++        try testing.expectEqual(resting, t.ctx.node(button).style.background.?);
++        try testing.expectEqual(@as(f32, 0), t.ctx.node(button).style.offset.y);
++        @field(t.ctx, flag) = false;
++        t.ctx.pointerDown();
++        t.frame();
++        try testing.expect(t.ctx.node(button).style.offset.y > 0);
++    }
++}
+diff --git a/src/ui/widgets.zig b/src/ui/widgets.zig
+index a66ac80..e5638b3 100644
+--- a/src/ui/widgets.zig
++++ b/src/ui/widgets.zig
+@@ -259,7 +259,7 @@ pub fn button(c: *Context, title: []const u8, opts: ButtonOptions) Interaction {
+             n.style.background = th.surface_hover.alpha(hover).mix(th.border, press * 0.5);
+         },
+     }
+-    n.style.offset.y = press * 0.5;
++    n.style.offset.y = if (c.reduced_motion or c.reduce_motion) 0 else press * 0.5;
+     n.style.gap = opts.size * 0.4;
+     if (it.clicked) c.changed = true;
+     if (opts.icon.len > 0) icon(c, opts.icon, .{ .size = opts.size, .weight = .medium, .color = fg });
+diff --git a/src/windows/dialog.zig b/src/windows/dialog.zig
+index a69d9a8..8fe2fc3 100644
+--- a/src/windows/dialog.zig
++++ b/src/windows/dialog.zig
+@@ -12,6 +12,7 @@ pub const MessageResult = dialog_types.MessageResult;
+ pub const freePaths = dialog_types.freePaths;
+ 
+ pub fn open(gpa: std.mem.Allocator, opts: OpenOptions) !?[][]u8 {
++    if (opts.directories) return @import("folder_dialog.zig").open(gpa, opts);
+     var file: [4096]u16 = @splat(0);
+     var title: [256]u16 = undefined;
+     var ofn: w.OPENFILENAMEW = .{ .lpstrFile = &file, .nMaxFile = file.len, .lpstrTitle = if (opts.title.len > 0) w.wide(&title, opts.title) else null, .Flags = w.OFN_EXPLORER | w.OFN_FILEMUSTEXIST | w.OFN_NOCHANGEDIR };
+diff --git a/src/windows/surface.zig b/src/windows/surface.zig
+index 3123ae5..b200fda 100644
+--- a/src/windows/surface.zig
++++ b/src/windows/surface.zig
+@@ -12,7 +12,8 @@ const types = @import("../ui/types.zig");
+ const gpu = @import("../ui/gpu.zig");
+ const canvas = @import("../ui/canvas.zig");
+ const text = @import("../ui/text.zig");
+-const frame_mod = @import("../ui/frame.zig");
++const frame_side = @import("surface_frame.zig");
++const a11y = @import("a11y.zig");
+ const ctx_mod = @import("../ui/context.zig");
+ const clock = @import("../ui/clock.zig");
+ const Theme = @import("../ui/theme.zig").Theme;
+@@ -25,9 +26,6 @@ const ime = @import("ime.zig");
+ 
+ /// Posted for a frame requested from outside the view.
+ pub const WM_FRAME = w.WM_APP + 1;
+-const tick_timer = 1;
+-/// A frame asked for later (`frameIn`).
+-const later_timer: usize = 2;
+ 
+ pub const Surface = struct {
+     gpa: std.mem.Allocator,
+@@ -112,6 +110,7 @@ pub const Surface = struct {
+         // The system's appearance now, and again if it changes while the app
+         // runs (a window without a theme of its own follows it).
+         self.system_theme_dark = @import("desktop.zig").isDark();
++        _ = a11y.refresh(&self.ctx);
+         return self;
+     }
+ 
+@@ -130,14 +129,6 @@ pub const Surface = struct {
+         return self.window.hwnd;
+     }
+ 
+-    /// The theme the frame is drawn with: a window's own when it named one,
+-    /// else the one the view chose (`c.theme`), else the system's appearance.
+-    fn theme(self: *Surface) Theme {
+-        if (self.theme_override) |t| return t;
+-        if (self.theme_chosen) |t| return t;
+-        return if (self.system_theme_dark) Theme.dark_theme else Theme.light;
+-    }
+-
+     /// `NANOUI_TRACE`: what the surface is doing, to stderr.
+     pub fn trace(self: *Surface, comptime fmt: []const u8, args: anytype) void {
+         if (!self.trace_on) return;
+@@ -173,56 +164,7 @@ pub const Surface = struct {
+         self.size_dirty = false;
+     }
+ 
+-    /// Builds one frame: layout, paint, and the timers animations and later
+-    /// frames need, without asking for a paint. `frame` adds that; `paint` is
+-    /// already drawing.
+-    pub fn buildFrame(self: *Surface) void {
+-        if (self.size.w <= 0 or self.size.h <= 0) return;
+-        const c = &self.ctx;
+-        const now = clock.now();
+-        const raw_dt: f32 = if (self.last_frame_time > 0) @floatCast(@min(now - self.last_frame_time, 1.0)) else 1.0 / 60.0;
+-        const dt: f32 = if (self.last_frame_time > 0) @floatCast(@min(now - self.last_frame_time, 0.1)) else 1.0 / 60.0;
+-        self.last_frame_time = now;
+-        // The theme the view picked last frame, and the one it picks now: a
+-        // view that picks a theme has the frame rebuilt with it in this same
+-        // frame, so a change shows at once and the first frame is right too.
+-        var drawn_theme = self.theme();
+-        var r = frame_mod.run(c, self.view, &self.text, &self.instances, self.size, self.scale, drawn_theme, dt, now - self.start_time);
+-        if (!sameChoice(self.theme_chosen, c.theme_chosen)) {
+-            self.theme_chosen = c.theme_chosen;
+-            drawn_theme = self.theme();
+-            r = frame_mod.run(c, self.view, &self.text, &self.instances, self.size, self.scale, drawn_theme, dt, now - self.start_time);
+-        }
+-        // The real gap, for a view that reports its frame rate: `dt` above is
+-        // clamped so an animation cannot jump. The rate is what it is.
+-        c.frame_time = raw_dt;
+-        // The caret may have moved: the IME's windows follow it.
+-        if (c.focused_text != null) if (self.hwnd()) |h| ime.followIfMoved(h, c, self.scale, &self.ime);
+-        if (c.close_request) {
+-            c.close_request = false;
+-            self.window.close();
+-        }
+-        self.updateCursor();
+-        const more = c.animating or r.hot_changed;
+-        if (more and !self.ticking) if (self.hwnd()) |h| {
+-            _ = w.SetTimer(h, tick_timer, 16, null);
+-            self.ticking = true;
+-            self.trace("tick timer on", .{});
+-        };
+-        // Something changes now and then: one frame, that much later.
+-        if (!more) if (c.frame_in) |s| if (self.hwnd()) |h| {
+-            _ = w.SetTimer(h, later_timer, @intFromFloat(@max(1, s * 1000)), null);
+-            self.trace("later timer {d} ms", .{@as(u32, @intFromFloat(@max(1, s * 1000)))});
+-        };
+-        self.trace("built: {d:.0}x{d:.0} scale {d:.2}, {d} draws, anim={} hot={} in={?d:.2} ticking={}", .{ self.size.w, self.size.h, self.scale, self.instances.items.len, c.animating, r.hot_changed, c.frame_in, self.ticking });
+-    }
+-
+-    /// Whether two theme choices pick the same theme (both null: the system's).
+-    fn sameChoice(a: ?Theme, b: ?Theme) bool {
+-        const an = a orelse return b == null;
+-        const bn = b orelse return false;
+-        return std.meta.eql(an, bn);
+-    }
++    pub const buildFrame = frame_side.buildFrame;
+ 
+     pub fn requestFrame(self: *Surface) void {
+         if (self.frame_posted) return;
+@@ -231,7 +173,7 @@ pub const Surface = struct {
+         _ = w.PostMessageW(h, WM_FRAME, 0, 0);
+     }
+ 
+-    fn updateCursor(self: *Surface) void {
++    pub fn updateCursor(self: *Surface) void {
+         self.cursor = self.ctx.cursor orelse if (self.ctx.cursor_text) .text else if (self.ctx.cursor_hand) .hand else .arrow;
+     }
+ 
+@@ -345,15 +287,18 @@ pub const Surface = struct {
+             w.WM_SHOWWINDOW => if (wp != 0) self.requestFrame(),
+             w.WM_DISPLAYCHANGE => self.requestFrame(),
+             w.WM_SETTINGCHANGE => {
++                // Accessibility changes apply even to a window with its own theme.
++                var changed = a11y.refresh(&self.ctx);
+                 // The system's appearance may have changed under
+                 // Personalization > Colors: a window that follows it is redrawn.
+                 if (self.theme_override == null) {
+                     const dark = @import("desktop.zig").isDark();
+                     if (dark != self.system_theme_dark) {
+                         self.system_theme_dark = dark;
+-                        self.frame();
++                        changed = true;
+                     }
+                 }
++                if (changed) self.requestFrame();
+             },
+             w.WM_DPICHANGED => {
+                 // The window has moved or been scaled onto a monitor with
+@@ -409,14 +354,14 @@ pub const Surface = struct {
+                 }
+                 if (!begin) self.requestFrame();
+             },
+-            w.WM_TIMER => if (wp == later_timer) {
+-                _ = w.KillTimer(h, later_timer);
++            w.WM_TIMER => if (wp == frame_side.later_timer) {
++                _ = w.KillTimer(h, frame_side.later_timer);
+                 self.trace("later timer fired", .{});
+                 self.frame();
+-            } else if (wp == tick_timer) {
++            } else if (wp == frame_side.tick_timer) {
+                 self.frame();
+                 if (!self.ctx.animating) {
+-                    _ = w.KillTimer(h, tick_timer);
++                    _ = w.KillTimer(h, frame_side.tick_timer);
+                     self.ticking = false;
+                     self.trace("tick timer off", .{});
+                 }
+diff --git a/src/windows/tests_surface.zig b/src/windows/tests_surface.zig
+index 00b489b..b5500c6 100644
+--- a/src/windows/tests_surface.zig
++++ b/src/windows/tests_surface.zig
+@@ -288,3 +288,29 @@ test "a one-shot requestClose closes the window once the frame is done" {
+     try testing.expect(cl.closed);
+     try testing.expectEqual(@as(usize, 0), app.windows.items.len);
+ }
++
++test "Windows animation preference reaches a headless surface initially and on setting change" {
++    const w = @import("win32.zig");
++    var enabled: w.BOOL = 1;
++    try testing.expect(w.SystemParametersInfoW(w.SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0) != 0);
++    const reduce = enabled == 0;
++    var app: App = .{
++        .gpa = testing.allocator,
++        .io = std.Io.Threaded.global_single_threaded.io(),
++        .options = .{},
++    };
++    // No HWND is created: only the surface's startup and message paths run.
++    var win: @import("window.zig").Window = .{ .app = &app };
++    var p: Page = .{};
++    const s = try @import("surface.zig").Surface.create(&win, .init(&p, Page.view), ui.Theme.light);
++    defer s.destroy();
++    try testing.expectEqual(reduce, s.ctx.reduced_motion);
++    try testing.expectEqual(reduce, s.ctx.reduce_motion);
++    // Stale state is refreshed even with an explicit theme. The real system
++    // preference is read only; the test never changes the user's settings.
++    s.ctx.reduced_motion = !reduce;
++    s.ctx.reduce_motion = !reduce;
++    _ = s.handle(undefined, w.WM_SETTINGCHANGE, 0, 0);
++    try testing.expectEqual(reduce, s.ctx.reduced_motion);
++    try testing.expectEqual(reduce, s.ctx.reduce_motion);
++}
+diff --git a/src/windows/win32.zig b/src/windows/win32.zig
+index 6a35f45..e24c2f4 100644
+--- a/src/windows/win32.zig
++++ b/src/windows/win32.zig
+@@ -112,6 +112,8 @@ pub extern "user32" fn TrackMouseEvent(e: *TRACKMOUSEEVENT) callconv(.winapi) BO
+ pub extern "user32" fn ScreenToClient(hwnd: HWND, p: *POINT) callconv(.winapi) BOOL;
+ pub extern "user32" fn ClientToScreen(hwnd: HWND, p: *POINT) callconv(.winapi) BOOL;
+ pub extern "user32" fn GetKeyState(vk: i32) callconv(.winapi) i16;
++pub const SPI_GETCLIENTAREAANIMATION = 0x1042;
++pub extern "user32" fn SystemParametersInfoW(action: u32, param: u32, value: ?*anyopaque, flags: u32) callconv(.winapi) BOOL;
+ pub extern "user32" fn SetTimer(hwnd: ?HWND, id: usize, ms: u32, proc: ?TIMERPROC) callconv(.winapi) usize;
+ pub extern "user32" fn KillTimer(hwnd: ?HWND, id: usize) callconv(.winapi) BOOL;
+ pub extern "user32" fn LoadCursorW(inst: ?HINSTANCE, name: usize) callconv(.winapi) ?HCURSOR;
+diff --git a/src/windows/a11y.zig b/src/windows/a11y.zig
+new file mode 100644
+index 0000000..f27fbfc
+--- /dev/null
++++ b/src/windows/a11y.zig
+@@ -0,0 +1,15 @@
++//! Windows accessibility preferences, read initially and on WM_SETTINGCHANGE.
++const w = @import("win32.zig");
++const Context = @import("../ui/context.zig").Context;
++
++/// Read the system's "Animation effects" preference without changing it.
++/// Failure leaves the last known preference intact.
++pub fn refresh(c: *Context) bool {
++    var enabled: w.BOOL = 1;
++    if (w.SystemParametersInfoW(w.SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0) == 0) return false;
++    const reduce = enabled == 0;
++    const changed = c.reduced_motion != reduce or c.reduce_motion != reduce;
++    c.reduced_motion = reduce;
++    c.reduce_motion = reduce;
++    return changed;
++}
+diff --git a/src/windows/folder_dialog.zig b/src/windows/folder_dialog.zig
+new file mode 100644
+index 0000000..942c53a
+--- /dev/null
++++ b/src/windows/folder_dialog.zig
+@@ -0,0 +1,139 @@
++//! Native folder selection through IFileOpenDialog. Vtable slots follow
++//! the Windows SDK's shobjidl.h; creating/configuring it shows no window.
++const std = @import("std");
++const w = @import("win32.zig");
++const Options = @import("../dialog_types.zig").OpenOptions;
++
++const clsid: w.Guid = .{ .a = 0xdc1c5a9c, .b = 0xe88a, .c = 0x4dde, .d = .{ 0xa5, 0xa1, 0x60, 0xf8, 0x2a, 0x20, 0xae, 0xf7 } };
++const iid: w.Guid = .{ .a = 0xd57c7288, .b = 0xd4ad, .c = 0x4768, .d = .{ 0xbe, 0x02, 0x9d, 0x96, 0x95, 0x32, 0xd9, 0x60 } };
++const iid_item: w.Guid = .{ .a = 0x43826d1e, .b = 0xe718, .c = 0x42ee, .d = .{ 0xbc, 0x55, 0xa1, 0xe2, 0x61, 0xc3, 0x7b, 0xfe } };
++const pick_folders: u32 = 0x20;
++const force_filesystem: u32 = 0x40;
++const allow_multiple: u32 = 0x200;
++const path_must_exist: u32 = 0x800;
++const force_hidden: u32 = 0x10000000;
++const cancelled: i32 = @bitCast(@as(u32, 0x800704c7));
++
++extern "ole32" fn CoTaskMemFree(p: ?*anyopaque) callconv(.winapi) void;
++extern "ole32" fn CoInitializeEx(reserved: ?*anyopaque, flags: u32) callconv(.winapi) i32;
++extern "ole32" fn CoUninitialize() callconv(.winapi) void;
++extern "user32" fn GetActiveWindow() callconv(.winapi) ?w.HWND;
++extern "shell32" fn SHCreateItemFromParsingName(path: [*:0]const u16, ctx: ?*anyopaque, riid: *const w.Guid, out: *?*anyopaque) callconv(.winapi) i32;
++
++const Com = extern struct {
++    vtable: [*]const *const anyopaque,
++
++    fn slot(self: *Com, comptime T: type, index: usize) T {
++        return @ptrCast(@alignCast(self.vtable[index]));
++    }
++
++    fn release(self: *Com) void {
++        _ = self.slot(*const fn (*Com) callconv(.winapi) u32, 2)(self);
++    }
++};
++
++fn check(result: i32) !void {
++    if (result < 0) return error.DialogFailed;
++}
++
++fn setText(gpa: std.mem.Allocator, dialog: *Com, slot: usize, text: []const u8) !void {
++    if (text.len == 0) return;
++    const wide = try std.unicode.utf8ToUtf16LeAllocZ(gpa, text);
++    defer gpa.free(wide);
++    try check(dialog.slot(*const fn (*Com, [*:0]const u16) callconv(.winapi) i32, slot)(dialog, wide));
++}
++
++fn create(gpa: std.mem.Allocator, opts: Options) !*Com {
++    var raw: ?*anyopaque = null;
++    try check(w.CoCreateInstance(&clsid, null, 1, &iid, &raw));
++    const dialog: *Com = @ptrCast(@alignCast(raw orelse return error.DialogFailed));
++    errdefer dialog.release();
++    var flags: u32 = 0;
++    try check(dialog.slot(*const fn (*Com, *u32) callconv(.winapi) i32, 10)(dialog, &flags));
++    flags |= pick_folders | force_filesystem | path_must_exist;
++    if (opts.multiple) flags |= allow_multiple;
++    if (opts.show_hidden) flags |= force_hidden;
++    try check(dialog.slot(*const fn (*Com, u32) callconv(.winapi) i32, 9)(dialog, flags));
++    try setText(gpa, dialog, 17, opts.title);
++    try setText(gpa, dialog, 18, opts.button);
++    if (opts.directory.len > 0) {
++        const path = try std.unicode.utf8ToUtf16LeAllocZ(gpa, opts.directory);
++        defer gpa.free(path);
++        var item_raw: ?*anyopaque = null;
++        try check(SHCreateItemFromParsingName(path, null, &iid_item, &item_raw));
++        const item: *Com = @ptrCast(@alignCast(item_raw orelse return error.DialogFailed));
++        defer item.release();
++        try check(dialog.slot(*const fn (*Com, *Com) callconv(.winapi) i32, 12)(dialog, item));
++    }
++    return dialog;
++}
++
++fn itemPath(gpa: std.mem.Allocator, item: *Com) ![]u8 {
++    var path: ?[*:0]u16 = null;
++    // SIGDN_FILESYSPATH returns a filesystem path, never a shell display name.
++    try check(item.slot(*const fn (*Com, u32, *?[*:0]u16) callconv(.winapi) i32, 5)(item, 0x80058000, &path));
++    const value = path orelse return error.DialogFailed;
++    defer CoTaskMemFree(value);
++    return std.unicode.utf16LeToUtf8Alloc(gpa, std.mem.span(value));
++}
++
++pub fn open(gpa: std.mem.Allocator, opts: Options) !?[][]u8 {
++    try check(CoInitializeEx(null, 2));
++    defer CoUninitialize();
++    const dialog = try create(gpa, opts);
++    defer dialog.release();
++    const result = dialog.slot(*const fn (*Com, ?w.HWND) callconv(.winapi) i32, 3)(dialog, GetActiveWindow());
++    if (result == cancelled) return null;
++    try check(result);
++    var items: ?*Com = null;
++    try check(dialog.slot(*const fn (*Com, *?*Com) callconv(.winapi) i32, 27)(dialog, &items));
++    const array = items orelse return error.DialogFailed;
++    defer array.release();
++    var count: u32 = 0;
++    try check(array.slot(*const fn (*Com, *u32) callconv(.winapi) i32, 7)(array, &count));
++    const paths = try gpa.alloc([]u8, count);
++    var filled: usize = 0;
++    errdefer {
++        for (paths[0..filled]) |path| gpa.free(path);
++        gpa.free(paths);
++    }
++    while (filled < count) : (filled += 1) {
++        var item: ?*Com = null;
++        try check(array.slot(*const fn (*Com, u32, *?*Com) callconv(.winapi) i32, 8)(array, @intCast(filled), &item));
++        const entry = item orelse return error.DialogFailed;
++        defer entry.release();
++        paths[filled] = try itemPath(gpa, entry);
++    }
++    return paths;
++}
++
++test "native folder dialog configures folder selection without showing a window" {
++    try check(CoInitializeEx(null, 2));
++    defer CoUninitialize();
++    var tmp = std.testing.tmpDir(.{});
++    defer tmp.cleanup();
++    try tmp.dir.createDir(std.testing.io, "Māori folder", .default_dir);
++    const path = try tmp.dir.realPathFileAlloc(std.testing.io, "Māori folder", std.testing.allocator);
++    defer std.testing.allocator.free(path);
++    const dialog = try create(std.testing.allocator, .{
++        .files = false,
++        .directories = true,
++        .multiple = true,
++        .show_hidden = true,
++        .title = "Choose a folder",
++        .button = "Scan folder",
++        .directory = path,
++    });
++    defer dialog.release();
++    var flags: u32 = 0;
++    try check(dialog.slot(*const fn (*Com, *u32) callconv(.winapi) i32, 10)(dialog, &flags));
++    const required = pick_folders | force_filesystem | path_must_exist | allow_multiple | force_hidden;
++    try std.testing.expectEqual(required, flags & required);
++    var item: ?*Com = null;
++    try check(dialog.slot(*const fn (*Com, *?*Com) callconv(.winapi) i32, 13)(dialog, &item));
++    const folder = item orelse return error.DialogFailed;
++    defer folder.release();
++    const actual = try itemPath(std.testing.allocator, folder);
++    defer std.testing.allocator.free(actual);
++    try std.testing.expectEqualStrings(path, actual);
++}
+diff --git a/src/windows/surface_frame.zig b/src/windows/surface_frame.zig
+new file mode 100644
+index 0000000..d43d7e8
+--- /dev/null
++++ b/src/windows/surface_frame.zig
+@@ -0,0 +1,71 @@
++//! Building a Windows surface's frame, its theme, and animation timers.
++const std = @import("std");
++const w = @import("win32.zig");
++const frame_mod = @import("../ui/frame.zig");
++const clock = @import("../ui/clock.zig");
++const Theme = @import("../ui/theme.zig").Theme;
++const Surface = @import("surface.zig").Surface;
++const ime = @import("ime.zig");
++
++pub const tick_timer = 1;
++/// A frame asked for later (`frameIn`).
++pub const later_timer: usize = 2;
++
++/// Builds one frame: layout, paint, and the timers animations and later
++/// frames need, without asking for a paint. `frame` adds that; `paint` is
++/// already drawing.
++pub fn buildFrame(self: *Surface) void {
++    if (self.size.w <= 0 or self.size.h <= 0) return;
++    const c = &self.ctx;
++    const now = clock.now();
++    const raw_dt: f32 = if (self.last_frame_time > 0) @floatCast(@min(now - self.last_frame_time, 1.0)) else 1.0 / 60.0;
++    const dt: f32 = if (self.last_frame_time > 0) @floatCast(@min(now - self.last_frame_time, 0.1)) else 1.0 / 60.0;
++    self.last_frame_time = now;
++    // The theme the view picked last frame, and the one it picks now: a
++    // view that picks a theme has the frame rebuilt with it in this same
++    // frame, so a change shows at once and the first frame is right too.
++    var drawn_theme = theme(self);
++    var r = frame_mod.run(c, self.view, &self.text, &self.instances, self.size, self.scale, drawn_theme, dt, now - self.start_time);
++    if (!sameChoice(self.theme_chosen, c.theme_chosen)) {
++        self.theme_chosen = c.theme_chosen;
++        drawn_theme = theme(self);
++        r = frame_mod.run(c, self.view, &self.text, &self.instances, self.size, self.scale, drawn_theme, dt, now - self.start_time);
++    }
++    // The real gap, for a view that reports its frame rate: `dt` above is
++    // clamped so an animation cannot jump. The rate is what it is.
++    c.frame_time = raw_dt;
++    // The caret may have moved: the IME's windows follow it.
++    if (c.focused_text != null) if (self.window.hwnd) |h| ime.followIfMoved(h, c, self.scale, &self.ime);
++    if (c.close_request) {
++        c.close_request = false;
++        self.window.close();
++    }
++    self.updateCursor();
++    const more = c.animating or r.hot_changed;
++    if (more and !self.ticking) if (self.window.hwnd) |h| {
++        _ = w.SetTimer(h, tick_timer, 16, null);
++        self.ticking = true;
++        self.trace("tick timer on", .{});
++    };
++    // Something changes now and then: one frame, that much later.
++    if (!more) if (c.frame_in) |s| if (self.window.hwnd) |h| {
++        _ = w.SetTimer(h, later_timer, @intFromFloat(@max(1, s * 1000)), null);
++        self.trace("later timer {d} ms", .{@as(u32, @intFromFloat(@max(1, s * 1000)))});
++    };
++    self.trace("built: {d:.0}x{d:.0} scale {d:.2}, {d} draws, anim={} hot={} in={?d:.2} ticking={}", .{ self.size.w, self.size.h, self.scale, self.instances.items.len, c.animating, r.hot_changed, c.frame_in, self.ticking });
++}
++
++/// The theme the frame is drawn with: a window's own when it named one,
++/// else the one the view chose (`c.theme`), else the system's appearance.
++fn theme(self: *Surface) Theme {
++    if (self.theme_override) |t| return t;
++    if (self.theme_chosen) |t| return t;
++    return if (self.system_theme_dark) Theme.dark_theme else Theme.light;
++}
++
++/// Whether two theme choices pick the same theme (both null: the system's).
++fn sameChoice(a: ?Theme, b: ?Theme) bool {
++    const an = a orelse return b == null;
++    const bn = b orelse return false;
++    return std.meta.eql(an, bn);
++}

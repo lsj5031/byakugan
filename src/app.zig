@@ -10,7 +10,7 @@ const explorer = @import("explorer.zig");
 const log = @import("log.zig");
 const alloc = std.heap.c_allocator;
 
-pub const Failure = enum(u8) { none, access, not_ntfs, cancelled, failed, folder_access, folder_missing, picker, start };
+pub const Failure = enum(u8) { none, access, not_ntfs, geometry, cancelled, failed, folder_access, folder_missing, picker, start };
 const JobKind = enum { volume, folder };
 pub const Job = struct {
     id: u64,
@@ -42,7 +42,7 @@ fn cancelled(ctx: ?*anyopaque) bool {
     return j.cancel.load(.acquire);
 }
 fn runJob(j: *Job) void {
-    log.info("scan started id={d} kind={s}", .{ j.id, @tagName(j.kind) });
+    if (j.kind == .volume) log.info("scan started id={d} kind=volume drive={c}:", .{ j.id, j.letter }) else log.info("scan started id={d} kind=folder", .{j.id});
     const callbacks: scan.Progress = .{ .ctx = j, .report = report, .is_cancelled = cancelled };
     const result = blk: {
         if (j.kind == .folder) break :blk by.folder_scan.scanTree(alloc, j.folder_path, callbacks);
@@ -51,6 +51,7 @@ fn runJob(j: *Job) void {
             j.failure = switch (err) {
                 error.AccessDenied => .access,
                 error.NotNtfs => .not_ntfs,
+                error.InvalidGeometry => .geometry,
                 else => .failed,
             };
             j.done.store(true, .release);
@@ -96,11 +97,14 @@ pub const State = struct {
     elevation_launch: ?volume.elevation.Launch = null,
     elevation_error: ?volume.elevation.Error = null,
     elevation_cancelled: bool = false,
+    cleanup: @import("cleanup_ui.zig").State = .{},
     close_child: bool = false,
     demo: bool = false,
     folder_mode: bool = false,
     root_label_buf: [4096]u8 = undefined,
     root_label_len: usize = 0,
+    initial_child_buf: [1024]u8 = undefined,
+    initial_child_len: usize = 0,
     used_bytes: u64 = 0,
     space: ?volume.Space = null,
     model: ?*model.Model = null,
@@ -122,6 +126,8 @@ pub const State = struct {
     inspector_other: bool = false,
     rows_dirty: bool = true,
     scroll_to: ?f32 = null,
+    inspector_scroll: f32 = 0,
+    preserve_navigation: bool = false,
     map_dirty: bool = true,
     map_w: f32 = -1,
     map_h: f32 = -1,
@@ -133,6 +139,7 @@ pub const State = struct {
         return .{ .gpa = gpa, .io = io };
     }
     pub fn deinit(self: *State) void {
+        self.cleanup.deinit();
         if (self.elevation_launch) |*launch| launch.deinit();
         if (self.job) |j| {
             j.cancel.store(true, .release);
@@ -181,6 +188,10 @@ pub const State = struct {
                 i += 1;
                 if (i < argv.len) folder = argv[i];
             } else if (std.mem.startsWith(u8, a, "--folder=")) folder = a[9..];
+            if (std.mem.startsWith(u8, a, "--select-child=") and a.len - 15 <= self.initial_child_buf.len) {
+                self.initial_child_len = a.len - 15;
+                @memcpy(self.initial_child_buf[0..self.initial_child_len], a[15..]);
+            }
         }
         self.drives = volume.logicalDrives();
         self.setVolumeLabel();
@@ -229,8 +240,15 @@ pub const State = struct {
         return c.print("{s}{s}{s}", .{ root, if (root.len > 0 and root[root.len - 1] == '\\' or rel.len == 0) "" else "\\", rel });
     }
     pub fn install(self: *State, m: *model.Model) void {
-        if (self.model) |old| old.deinit();
+        const old = self.model;
+        defer if (old) |previous| previous.deinit();
+        const focus = self.focus;
+        const selected = self.selected;
+        const parent = self.inspector_parent;
+        const other = self.other_parent;
+        const browsing = self.browsing_inspector;
         self.model = m;
+        self.cleanup.stale = false;
         self.failure = .none;
         self.scan_error_kept = false;
         self.focus = m.root;
@@ -245,7 +263,23 @@ pub const State = struct {
             if (n.isDirectory()) self.folders += 1 else self.files += 1;
         }
         m.sortChildren(alloc, if (self.metric_allocated) .allocated else .logical) catch {};
+        if (self.initial_child_len > 0) {
+            for (m.nodes, 0..) |n, i| {
+                if (n.parent == m.root and std.mem.eql(u8, m.name(@intCast(i)), self.initial_child_buf[0..self.initial_child_len])) {
+                    self.select(@intCast(i));
+                    break;
+                }
+            }
+            self.initial_child_len = 0;
+        }
         self.invalidate();
+        if (self.preserve_navigation and old != null) {
+            @import("navigation_restore.zig").restore(self, old.?, m, focus, selected, parent, other, browsing);
+        } else {
+            self.filter_buf.clear();
+            self.query.clearRetainingCapacity();
+        }
+        self.preserve_navigation = false;
     }
     pub fn invalidate(self: *State) void {
         self.rows_dirty = true;
@@ -352,11 +386,12 @@ pub const State = struct {
         self.startJob(.folder, path, self.letter);
     }
     fn startJob(self: *State, kind: JobKind, path: []const u8, letter: u8) void {
-        if (self.job != null or self.elevation_launch != null) return;
+        if (self.job != null or self.elevation_launch != null or self.cleanup.work != null) return;
+        self.preserve_navigation = false;
         self.elevation_error = null;
         self.elevation_cancelled = false;
         self.next_scan_id += 1;
-        log.info("scan request id={d} kind={s}", .{ self.next_scan_id, @tagName(kind) });
+        if (kind == .volume) log.info("scan request id={d} kind=volume drive={c}:", .{ self.next_scan_id, letter }) else log.info("scan request id={d} kind=folder", .{self.next_scan_id});
         const owned = alloc.dupe(u8, path) catch |err| {
             log.err("scan start failed id={d} error={s}", .{ self.next_scan_id, @errorName(err) });
             self.failure = .start;
@@ -382,17 +417,19 @@ pub const State = struct {
         nanoui.App.after(80, self, tick);
     }
     pub fn rescan(self: *State) void {
-        if (self.job != null or self.elevation_launch != null) return;
+        if (self.job != null or self.elevation_launch != null or self.cleanup.work != null) return;
         if (self.demo) {
             const fixture = by.demo.build(alloc) catch {
                 self.failure = .start;
                 return;
             };
+            self.preserve_navigation = true;
             self.install(fixture);
             log.info("scan complete id=0 kind=fixture files={d} folders={d}", .{ self.files, self.folders });
             return;
         }
         if (self.folder_mode) self.startFolderScan(self.rootLabel()) else self.startScan();
+        self.preserve_navigation = self.job != null;
     }
     pub fn restartElevated(self: *State) void {
         if (self.elevation_launch != null) return;
@@ -430,7 +467,7 @@ pub const State = struct {
     fn tick(ctx: ?*anyopaque) callconv(.c) void {
         const self: *State = @ptrCast(@alignCast(ctx.?));
         if (self.window) |w| w.redraw();
-        if (self.job != null) nanoui.App.after(80, self, tick);
+        if (self.job != null or self.cleanup.work != null) nanoui.App.after(80, self, tick);
     }
     fn finishJob(self: *State) void {
         const j = self.job orelse return;
@@ -458,7 +495,7 @@ pub const State = struct {
         self.destroyJob(j);
     }
     fn keys(self: *State, c: *ui.Context) void {
-        if (self.location_open or self.location_visible or self.elevation_launch != null) return;
+        if (self.location_open or self.location_visible or self.elevation_launch != null or self.cleanup.modal()) return;
         if (c.input.shortcut) |sc| {
             if ((sc.ctrl or sc.cmd) and sc.key == 'f') {
                 self.filter_buf.focus();
@@ -467,18 +504,24 @@ pub const State = struct {
             }
         }
         const k = c.input.key orelse return;
-        if (c.focused_text != null or (c.focus != 0 and k != .f5)) return;
+        if (c.focus != 0 and c.focus == self.filter_buf.last_id) return;
+        if (c.focused_text != null or (c.focus != 0 and k != .f5 and k != .delete and k != .down and k != .up)) return;
         const m = self.model orelse return;
         // One physical keystroke produces one navigation action, including
         // when nanoui rebuilds this frame after the state changes.
         defer c.input.key = null;
         switch (k) {
             .f5 => self.rescan(),
+            .delete => {
+                self.cleanup.request(self, c, c.focus);
+                c.input.shortcut = null;
+            },
             .escape, .backspace, .left => {
                 if (self.filter_buf.text().len > 0) self.filter_buf.clear() else if (self.focus != m.root) self.setFocus(m.nodes[self.focus].parent);
             },
             .enter, .right => self.setFocus(self.selected),
             .down, .up => {
+                c.focus = 0;
                 const browsing = self.other_parent != null or self.browsing_inspector;
                 const entries = if (browsing) self.inspector_entries.items else self.entries.items;
                 if (entries.len == 0) return;
@@ -502,11 +545,12 @@ pub const State = struct {
     pub fn view(self: *State, c: *ui.Context) void {
         self.pollElevation(c);
         self.finishJob();
+        self.cleanup.finish(self);
         self.ensureEntries();
         self.ensureInspector();
         self.keys(c);
         explorer.view(self, c);
-        if (self.job != null) c.frameIn(0.08);
+        if (self.job != null or self.cleanup.work != null) c.frameIn(0.08);
     }
 };
 

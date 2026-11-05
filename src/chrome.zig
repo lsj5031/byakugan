@@ -6,7 +6,7 @@ const windows = @import("builtin").os.tag == .windows;
 pub const header_h: f32 = 62;
 pub const caption_w: f32 = if (windows) 138 else 0;
 
-/// The existing circular Byakugan mark; the same source is the executable icon.
+/// The Partition mark; the same vector source supplies the executable icon.
 pub fn brand(c: *ui.Context, size: f32) void {
     _ = ui.image(c, .{
         .key = "byakugan-brand",

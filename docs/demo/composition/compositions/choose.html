@@ -1,0 +1,19 @@
+<template>
+<link rel="stylesheet" href="assets/film.css">
+<style>#root{position:absolute;inset:0}</style>
+<div id="root" data-composition-id="choose" data-width="1920" data-height="1080">
+<div class="ground"></div>
+<div class="badge"><img class="mark" src="assets/logo.svg" alt="">Byakugan</div>
+<div id="choose-copy" class="copy"><p class="eyebrow">01 / CHOOSE</p><h1>Start with<br>a folder.<br>Or a drive.</h1><p class="detail">You choose what<br>to scan.</p></div>
+<div id="choose-screen" class="screen">
+<img id="choose-picker" class="shot clip" data-start="0" data-duration="2.5" src="assets/screens/chooser.png" alt="Location chooser">
+<img id="choose-map" class="shot clip" data-start="2.5" data-duration="2.5" src="assets/screens/overview.png" alt="Demo scan overview">
+</div>
+<p class="foot">Edited app captures · scan shown with synthetic data</p>
+</div>
+<script>
+const tl=gsap.timeline({paused:true});
+tl.fromTo('#choose-copy',{opacity:0,y:12},{opacity:1,y:0,duration:0.45,ease:'power3.out'},0);
+tl.fromTo('#choose-screen',{scale:0.97},{scale:1,duration:0.55,ease:'power3.out'},0);
+window.__timelines.choose=tl;
+</script></template>

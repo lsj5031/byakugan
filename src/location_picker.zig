@@ -6,6 +6,11 @@ const button = @import("controls.zig").button;
 
 pub fn view(s: *App, c: *ui.Context) void {
     if (!s.location_open and !s.location_visible) return;
+    // This is a repeated navigation action. Keep keyboard and pointer use
+    // immediate, including expansion of the drive grid and dismissal.
+    const reduced = c.reduce_motion;
+    c.reduce_motion = true;
+    defer c.reduce_motion = reduced;
     const input = c.input;
     // Outgoing content is still painted by presence, but cannot activate.
     if (!s.location_open) c.input = .{};
@@ -13,6 +18,9 @@ pub fn view(s: *App, c: *ui.Context) void {
         c.input = input;
         c.input.clearEdges();
     };
+    ui.key(c, "location-placement");
+    const placement = ui.div(c).fixed().w(c.size.w).h(c.size.h).column().center().p(16);
+    defer placement.end();
     const dialog = nanoui.kit.dialog(c, "choose-location", &s.location_open, .{
         .title = "Choose a location",
         .description = "Scan a folder, or inspect an entire NTFS drive.",
@@ -28,6 +36,11 @@ pub fn view(s: *App, c: *ui.Context) void {
         }
         return;
     };
+    // Center using the current measured height, including an expanded grid.
+    const style = &c.node(dialog.panel.index).style;
+    style.absolute = false;
+    style.fixed = false;
+    style.offset = .{};
     s.location_visible = true;
     if (!s.location_open) c.input = .{};
     ui.text(c, "Folder", .{ .size = 16, .weight = .medium });
