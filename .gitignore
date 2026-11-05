@@ -1,0 +1,23 @@
+# Zig build outputs and package caches
+.zig-cache/
+zig-cache/
+zig-out/
+zig-pkg/
+
+# Generated test captures, logs, and local browser profiles
+artifacts/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local environment files
+.env
+.env.*
