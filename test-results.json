@@ -1,0 +1,381 @@
+{
+  "generated": "2026-11-05T06:13:44+00:00",
+  "summary": "24 checks passed \u00b7 0 failed \u00b7 2 blocked",
+  "passed": 24,
+  "failed": 0,
+  "blocked": 2,
+  "checks": [
+    {
+      "worker": "cli",
+      "stories": [
+        "US-001",
+        "US-030",
+        "US-035"
+      ],
+      "story": "US-001,US-030,US-035",
+      "name": "denied volume exits 2 with elevation hint",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 2 (wanted 2). byakugan-cli: access denied opening C: byakugan reads the NTFS master file table and needs administrator rights. Run this terminal as administrator and try again.",
+      "sec": 0.02,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-007",
+        "US-015",
+        "US-016",
+        "US-044"
+      ],
+      "story": "US-007,US-015,US-016,US-044",
+      "name": "demo report with --top 5",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0 (wanted 0). byakugan 0.1.0 \u2014 synthetic fixture (demo) (NTFS, 4096 B clusters, 1024 B records) scanned 5000 records (94 in use, 0 corrupt) in 0.00 s logical 233.8 GiB \u00b7 allocated 293.9 GiB 0 orphans \u00b7 0 extension records \u00b7 1 extra hard link top directories by allocated 95.0 GiB Games 92.0 GiB Games\\Steam 92.0 GiB Games\\Steam\\Steamapps 61.4 GiB Media 61.0 GiB Media\\Movies",
+      "sec": 0.02,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-015",
+        "US-016"
+      ],
+      "story": "US-015,US-016",
+      "name": "logical ranking emits three rows",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0 (wanted 0). byakugan 0.1.0 \u2014 synthetic fixture (demo) (NTFS, 4096 B clusters, 1024 B records) scanned 5000 records (94 in use, 0 corrupt) in 0.00 s logical 233.8 GiB \u00b7 allocated 293.9 GiB 0 orphans \u00b7 0 extension records \u00b7 1 extra hard link top directories by logical 92.0 GiB Games 92.0 GiB Games\\Steam 92.0 GiB Games\\Steam\\Steamapps",
+      "sec": 0.02,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-016"
+      ],
+      "story": "US-016",
+      "name": "--top consumes its value and emits five rows",
+      "ok": true,
+      "blocked": false,
+      "detail": "counted 5 report rows",
+      "sec": 0,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-016"
+      ],
+      "story": "US-016",
+      "name": "--top=0 emits no directory rows",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0 (wanted 0). byakugan 0.1.0 \u2014 synthetic fixture (demo) (NTFS, 4096 B clusters, 1024 B records) scanned 5000 records (94 in use, 0 corrupt) in 0.00 s logical 233.8 GiB \u00b7 allocated 293.9 GiB 0 orphans \u00b7 0 extension records \u00b7 1 extra hard link top directories by allocated",
+      "sec": 0.02,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-016"
+      ],
+      "story": "US-016",
+      "name": "bad count is a usage failure",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 4 (wanted 4). byakugan-cli: 'abc' is not a count Try --help.",
+      "sec": 0.02,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-016"
+      ],
+      "story": "US-016",
+      "name": "help text and exit 0",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0 (wanted 0). byakugan 0.1.0 \u2014 NTFS MFT disk analyzer usage: byakugan-cli [VOLUME] [options] VOLUME drive letter (C:) or \\\\.\\C: --top N rows in the directory report (default 15) --top=N same, in one argument --allocated rank directories by allocated bytes (default) --logical rank directories by logical bytes --no-progress suppress the progress line on stderr --demo report on the built-in synthetic volume (no admin) --folder DIR walk one accessible folder without admin (partial) --folder=DIR same, in one argument --help this text exit: 0 ok, 2 access denied, 3 not NTFS, 4 read/parse/usage failure",
+      "sec": 0.05,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-016"
+      ],
+      "story": "US-016",
+      "name": "missing volume exits 4",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 4 (wanted 4). byakugan-cli: could not open Q: (OpenFailed)",
+      "sec": 0.02,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-016"
+      ],
+      "story": "US-016",
+      "name": "unknown argument is a usage failure",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 4 (wanted 4). byakugan-cli: unknown argument '--bogus' Try --help.",
+      "sec": 0.02,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "cli",
+      "stories": [
+        "US-030"
+      ],
+      "story": "US-030",
+      "name": "folder mode works without admin",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0 (wanted 0). byakugan 0.1.0 \u2014 folder scan (no admin) \u2014 T:\\playground\\byakugan\\artifacts\\tmp87zqq7cd walked 5 items (0 skipped) in 0.00 s logical 11 B \u00b7 allocated 16 B partial scan: ordinary directory walk, no MFT; inaccessible entries skipped top directories by allocated 8 B nested",
+      "sec": 0.03,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "core",
+      "stories": [
+        "US-003",
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-008",
+        "US-009",
+        "US-010",
+        "US-011",
+        "US-012",
+        "US-014",
+        "US-036",
+        "US-043"
+      ],
+      "story": "US-003,US-004,US-005,US-006,US-008,US-009,US-010,US-011,US-012,US-014,US-036,US-043",
+      "name": "pure parser, scan and model suites",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0; 17 tests passed. Build Summary: 3/3 steps succeeded test-pure success +- run test cached +- compile test debug native cached 61ms MaxRSS:18M",
+      "sec": 0.24,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "ledger",
+      "stories": [
+        "US-033",
+        "US-036"
+      ],
+      "story": "US-033,US-036",
+      "name": "live dashboard serves the canonical spreadsheet",
+      "ok": true,
+      "blocked": false,
+      "detail": "HTTP 44 CSV rows; dashboard 13632 bytes at http://127.0.0.1:8787/",
+      "sec": 0.0,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "ledger",
+      "stories": [
+        "US-036"
+      ],
+      "story": "US-036",
+      "name": "features.csv is a complete, unique ledger",
+      "ok": true,
+      "blocked": false,
+      "detail": "44 rows; unique=True; missing=[]; bad_status=[]; bad_id=[]",
+      "sec": 0.0,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "ledger",
+      "stories": [
+        "US-036"
+      ],
+      "story": "US-036",
+      "name": "status vocabulary and blocked accounting",
+      "ok": true,
+      "blocked": false,
+      "detail": "counts {'Passing': 42, 'Blocked': 2}",
+      "sec": 0.0,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "ledger",
+      "stories": [
+        "US-037",
+        "US-038"
+      ],
+      "story": "US-037,US-038",
+      "name": "real-volume acceptance numbers",
+      "ok": null,
+      "blocked": true,
+      "detail": "blocked: needs elevation, a WizTree reference scan and a warm-cache timing run",
+      "sec": 0.0,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-001",
+        "US-030",
+        "US-035"
+      ],
+      "story": "US-001,US-030,US-035",
+      "name": "unprivileged C: shows the access-denied state with drive picker",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1280, 820), changed bbox (0, 11, 1280, 815); UAC prompt itself is not automatable",
+      "sec": 2.79,
+      "at": "2026-11-05T06:13:43+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-013",
+        "US-029"
+      ],
+      "story": "US-013,US-029",
+      "name": "scripted frame: hardlink",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1280, 820), changed bbox (0, 10, 1036, 693)",
+      "sec": 1.81,
+      "at": "2026-11-05T06:13:37+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-021",
+        "US-022",
+        "US-023",
+        "US-024",
+        "US-027",
+        "US-028",
+        "US-029",
+        "US-036"
+      ],
+      "story": "US-021,US-022,US-023,US-024,US-027,US-028,US-029,US-036",
+      "name": "headless Tester: drill, up, filter, extension click, keyboard, hard link",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0; 3 tests passed. Build Summary: 4/4 steps succeeded test-ui success +- run test cached +- compile test debug native cached 48ms MaxRSS:18M +- options cached",
+      "sec": 0.27,
+      "at": "2026-11-05T06:13:28+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-022",
+        "US-026"
+      ],
+      "story": "US-022,US-026",
+      "name": "scripted frame: games",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1280, 820), changed bbox (0, 16, 1279, 780)",
+      "sec": 1.68,
+      "at": "2026-11-05T06:13:31+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-024"
+      ],
+      "story": "US-024",
+      "name": "scripted frame: filter",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1280, 820), changed bbox (24, 2, 1036, 471)",
+      "sec": 1.69,
+      "at": "2026-11-05T06:13:33+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-027"
+      ],
+      "story": "US-027",
+      "name": "scripted frame: extension",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1280, 820), changed bbox (24, 10, 1036, 678)",
+      "sec": 1.69,
+      "at": "2026-11-05T06:13:38+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-028"
+      ],
+      "story": "US-028",
+      "name": "scripted frame: allocated",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1280, 820), changed bbox (24, 8, 1279, 749)",
+      "sec": 1.71,
+      "at": "2026-11-05T06:13:35+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-030"
+      ],
+      "story": "US-030",
+      "name": "folder mode renders a partial, no-admin view",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1280, 820), changed bbox (12, 16, 1279, 815)",
+      "sec": 1.6,
+      "at": "2026-11-05T06:13:44+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-033",
+        "US-031",
+        "US-039"
+      ],
+      "story": "US-033,US-031,US-039",
+      "name": "demo overview renders at 1280x820",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1280, 820), 4199608 bytes",
+      "sec": 1.65,
+      "at": "2026-11-05T06:13:30+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-034"
+      ],
+      "story": "US-034",
+      "name": "window resize reflows to 1000x700",
+      "ok": true,
+      "blocked": false,
+      "detail": "exit 0, size (1000, 700)",
+      "sec": 1.64,
+      "at": "2026-11-05T06:13:40+00:00"
+    },
+    {
+      "worker": "window",
+      "stories": [
+        "US-037",
+        "US-038"
+      ],
+      "story": "US-037,US-038",
+      "name": "real C: accounting and warm-cache timing",
+      "ok": null,
+      "blocked": true,
+      "detail": "not run: this runner has no administrator rights and cannot open \\\\.\\C:",
+      "sec": 0.0,
+      "at": "2026-11-05T06:13:44+00:00"
+    }
+  ],
+  "errors": []
+}

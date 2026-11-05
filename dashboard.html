@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>byakugan · live progress</title>
+<style>
+  :root {
+    --bg: #0b0f17;
+    --panel: #111827;
+    --panel2: #0f1724;
+    --line: #1f2a3d;
+    --text: #e8eefc;
+    --muted: #8b9bb4;
+    --accent: #4dd4c6;
+    --accent2: #7aa2ff;
+    --pass: #36d399;
+    --progress: #60a5fa;
+    --fail: #fb7185;
+    --blocked: #fbbf24;
+    --idle: #64748b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: radial-gradient(1200px 600px at 70% -10%, #16233a 0%, var(--bg) 55%);
+    color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 18px; padding: 26px 34px 18px;
+    border-bottom: 1px solid var(--line); backdrop-filter: blur(12px);
+    position: sticky; top: 0; background: rgba(11,15,23,.82); z-index: 5;
+  }
+  .eye { font-size: 30px; color: var(--accent); text-shadow: 0 0 28px rgba(77,212,198,.35); }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -.02em; font-weight: 700; }
+  h1 small { color: var(--muted); font-weight: 500; font-size: 13px; margin-left: 8px; letter-spacing: 0; }
+  .live { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .14em; margin-left: auto; white-space: nowrap; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(77,212,198,.55); } 50% { box-shadow: 0 0 0 7px rgba(77,212,198,0); } }
+  #synced { color: var(--muted); font-size: 12px; min-width: 190px; text-align: right; }
+  main { padding: 26px 34px 60px; max-width: 1440px; margin: 0 auto; }
+  .stats { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 14px; margin-bottom: 22px; }
+  .card { background: linear-gradient(160deg, var(--panel), var(--panel2)); border: 1px solid var(--line);
+    border-radius: 16px; padding: 18px 20px; }
+  .big { font-size: 42px; font-weight: 750; letter-spacing: -.04em; line-height: 1; }
+  .big span { font-size: 16px; color: var(--muted); font-weight: 500; letter-spacing: 0; }
+  .label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .16em; margin-bottom: 8px; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .bar { height: 9px; border-radius: 99px; background: #1b2739; overflow: hidden; display: flex; margin-top: 14px; }
+  .bar i { display: block; height: 100%; }
+  .bar .pass { background: var(--pass); }
+  .bar .prog { background: var(--progress); }
+  .bar .block { background: var(--blocked); }
+  .bar .fail { background: var(--fail); }
+  .num { font-size: 27px; font-weight: 700; letter-spacing: -.03em; }
+  .controls { display: flex; align-items: center; gap: 10px; margin: 8px 0 16px; flex-wrap: wrap; }
+  input[type=search] {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 10px;
+    padding: 9px 13px; width: 300px; outline: none; font: inherit;
+  }
+  input[type=search]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(77,212,198,.12); }
+  .chip { border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 99px;
+    padding: 6px 12px; cursor: pointer; font-size: 12px; user-select: none; }
+  .chip.on { border-color: var(--accent); color: var(--accent); background: rgba(77,212,198,.08); }
+  .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0 7px; }
+  thead th { text-align: left; color: var(--muted); font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase;
+    font-weight: 500; padding: 0 12px 6px; }
+  tbody tr { background: var(--panel); }
+  tbody tr td { padding: 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr td:first-child { border-left: 1px solid var(--line); border-radius: 11px 0 0 11px; }
+  tbody tr td:last-child { border-right: 1px solid var(--line); border-radius: 0 11px 11px 0; }
+  tbody tr:hover td { background: #142031; }
+  .id { color: var(--muted); font: 11px/1.4 ui-monospace, SFMono-Regular, monospace; white-space: nowrap; }
+  .feature { font-weight: 600; }
+  .area { color: var(--accent2); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 3px; }
+  .story { color: #c6d3e8; max-width: 360px; }
+  .expected { color: var(--muted); font-size: 12.5px; max-width: 420px; }
+  .status { display: inline-flex; align-items: center; gap: 6px; border-radius: 99px; padding: 4px 9px;
+    font-size: 10.5px; letter-spacing: .05em; white-space: nowrap; border: 1px solid; }
+  .status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .s-Passing { color: var(--pass); border-color: rgba(54,211,153,.35); background: rgba(54,211,153,.09); }
+  .s-In\ progress { color: var(--progress); border-color: rgba(96,165,250,.35); background: rgba(96,165,250,.09); }
+  .s-Blocked { color: var(--blocked); border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.08); }
+  .s-Failing { color: var(--fail); border-color: rgba(251,113,133,.4); background: rgba(251,113,133,.09); }
+  .s-Not\ started { color: var(--idle); border-color: #334155; background: #0f172a; }
+  .evidence { color: var(--muted); font: 11px/1.4 ui-monospace, SFMono-Regular, monospace; max-width: 250px; }
+  .note { color: #63748e; font-size: 11.5px; margin-top: 4px; }
+  .errors { margin-top: 26px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--panel2); }
+  .errors h2 { margin: 0; padding: 14px 18px; font-size: 13px; border-bottom: 1px solid var(--line); }
+  .err { display: grid; grid-template-columns: 110px 110px 1fr; gap: 10px; padding: 10px 18px; border-bottom: 1px solid #172033; font-size: 12px; }
+  .err:last-child { border-bottom: 0; }
+  .err b { color: var(--fail); font-weight: 600; }
+  .err .when { color: var(--muted); font: 10.5px ui-monospace, monospace; }
+  .empty { color: var(--muted); padding: 16px 18px; }
+  footer { color: #52627a; font-size: 11px; margin-top: 26px; }
+  @media (max-width: 900px) { .stats { grid-template-columns: 1fr 1fr; } .story, .expected { max-width: none; } table { display:block; overflow-x:auto; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="eye">白眼</div>
+  <h1>byakugan <small>MFT disk analyzer · feature ledger</small></h1>
+  <div class="live"><span class="dot"></span> live</div>
+  <div id="synced">waiting for features.csv…</div>
+</header>
+<main>
+  <section class="stats">
+    <div class="card">
+      <div class="label">User stories passing</div>
+      <div class="big" id="pct">—</div>
+      <div class="bar" id="bar"><i class="pass" style="width:0"></i><i class="prog" style="width:0"></i><i class="block" style="width:0"></i><i class="fail" style="width:0"></i></div>
+      <div class="sub" id="barlegend">Reading the canonical spreadsheet…</div>
+    </div>
+    <div class="card"><div class="label">Passing</div><div class="num" style="color:var(--pass)" id="npass">—</div><div class="sub">with evidence in the repo</div></div>
+    <div class="card"><div class="label">Open</div><div class="num" style="color:var(--progress)" id="nopen">—</div><div class="sub">in progress or not started</div></div>
+    <div class="card"><div class="label">Blocked / failing</div><div class="num" style="color:var(--blocked)" id="nblock">—</div><div class="sub" id="nfail">—</div></div>
+  </section>
+
+  <div class="controls">
+    <input type="search" id="q" placeholder="Filter by feature, story, area, evidence…">
+    <span class="chip on" data-status="all">All</span>
+    <span class="chip" data-status="Passing">Passing</span>
+    <span class="chip" data-status="In progress">In progress</span>
+    <span class="chip" data-status="Blocked">Blocked</span>
+    <span class="chip" data-status="Failing">Failing</span>
+    <span class="meta" id="count"></span>
+  </div>
+
+  <table>
+    <thead><tr><th style="width:70px">Story</th><th style="width:230px">Feature</th><th>User story</th><th>Expected behavior</th><th style="width:115px">Status</th><th style="width:250px">Evidence</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6" class="empty">Loading features.csv…</td></tr></tbody>
+  </table>
+
+  <section class="errors">
+    <h2>Latest test findings <span style="color:var(--muted);font-weight:400">· test-results.json</span></h2>
+    <div id="errors" class="empty">No findings yet. Test workers write them here.</div>
+  </section>
+  <footer>Canonical source: features.csv · auto-refreshes every 2 s · dashboard is served from the repo root</footer>
+</main>
+<script>
+const state = { rows: [], filter: 'all', q: '', last: 0, ok: false };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function parseCSV(text) {
+  const rows = []; let row = [], field = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"') { if (text[i+1] === '"') { field += '"'; i++; } else quoted = false; }
+      else field += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') { row.push(field); field = ''; }
+    else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (ch !== '\r') field += ch;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  const header = (rows.shift() || []).map(h => h.trim());
+  return rows.filter(r => r.some(v => v.trim())).map(r => {
+    const o = {};
+    header.forEach((h, i) => o[h] = (r[i] || '').trim());
+    return o;
+  });
+}
+
+function totals() {
+  const t = { Passing: 0, 'In progress': 0, 'Blocked': 0, 'Failing': 0, 'Not started': 0, all: state.rows.length };
+  for (const r of state.rows) if (r.status in t) t[r.status]++;
+  return t;
+}
+
+function draw() {
+  const t = totals();
+  const pct = t.all ? Math.round(100 * t.Passing / t.all) : 0;
+  $('pct').innerHTML = `${pct}<span>%</span>`;
+  const w = (n) => t.all ? (100 * n / t.all).toFixed(1) + '%' : '0%';
+  const bar = $('bar').children;
+  bar[0].style.width = w(t.Passing); bar[1].style.width = w(t['In progress']);
+  bar[2].style.width = w(t.Blocked); bar[3].style.width = w(t.Failing);
+  $('barlegend').textContent = `${t.Passing} of ${t.all} stories passing · ${t['In progress']} in progress · ${t.Blocked} blocked · ${t.Failing} failing`;
+  $('npass').textContent = t.Passing;
+  $('nopen').textContent = t['In progress'] + t['Not started'];
+  $('nblock').textContent = t.Blocked + t.Failing;
+  $('nfail').textContent = t.Failing ? `${t.Failing} failing` : 'none failing';
+  $('count').textContent = `${state.rows.length} stories · spreadsheet-driven`;
+
+  const q = state.q.toLowerCase();
+  const rows = state.rows.filter(r => {
+    if (state.filter !== 'all' && r.status !== state.filter) return false;
+    if (!q) return true;
+    return ['id','area','feature','user_story','expected_behavior','status','evidence','notes']
+      .some(k => (r[k] || '').toLowerCase().includes(q));
+  });
+  $('rows').innerHTML = rows.map(r => `
+    <tr>
+      <td class="id">${esc(r.id)}</td>
+      <td><div class="area">${esc(r.area)}</div><div class="feature">${esc(r.feature)}</div></td>
+      <td class="story">${esc(r.user_story)}</td>
+      <td><div class="expected">${esc(r.expected_behavior)}</div>${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ''}</td>
+      <td><span class="status s-${esc(r.status).replaceAll(' ', '\\ ')}">${esc(r.status)}</span></td>
+      <td class="evidence">${esc(r.evidence)}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="empty">No stories match this filter.</td></tr>`;
+  $('synced').textContent = state.ok ? `synced ${new Date().toLocaleTimeString()} · ${state.rows.length} stories` : 'features.csv not reachable';
+}
+
+async function refresh() {
+  try {
+    const res = await fetch('./features.csv?ts=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    const text = await res.text();
+    const rows = parseCSV(text).filter(r => r.id);
+    state.rows = rows; state.ok = true; state.last = Date.now();
+    draw();
+  } catch (e) {
+    state.ok = false;
+    if (!state.rows.length) $('rows').innerHTML = `<tr><td colspan="6" class="empty">Could not load features.csv (${esc(e.message)}). Serve the repo root over HTTP and reload.</td></tr>`;
+    draw();
+  }
+  try {
+    const r = await fetch('./test-results.json?ts=' + Date.now(), { cache: 'no-store' });
+    if (r.ok) {
+      const data = await r.json();
+      const errs = (data.errors || []).slice(-20).reverse();
+      $('errors').innerHTML = errs.length ? errs.map(e => `
+        <div class="err"><b>${esc(e.worker || 'test')}</b><span>${esc(e.story || '')}</span><span>${esc(e.message)}<div class="when">${esc(e.at || '')}</div></span></div>`).join('')
+        : `<div class="empty">${esc(data.summary || 'All worker checks passed so far.')}</div>`;
+    }
+  } catch (_) {}
+}
+
+$('q').addEventListener('input', (e) => { state.q = e.target.value; draw(); });
+document.querySelectorAll('.chip').forEach(ch => ch.addEventListener('click', () => {
+  document.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === ch));
+  state.filter = ch.dataset.status; draw();
+}));
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
