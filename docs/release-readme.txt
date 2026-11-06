@@ -34,5 +34,6 @@ Logs: %LOCALAPPDATA%\byakugan\byakugan.log, TEMP fallback, at most one archive.
 Set BYAKUGAN_LOG=off to disable file logging. Logs record lifecycle events and
 aggregate counts, not file inventories; inspect logs before sharing them.
 
+Byakugan's original source and documentation are MIT licensed; see LICENSE.
 See THIRD_PARTY_NOTICES.md and third_party/licenses/ for dependency terms.
-An open-source license for Byakugan's original source is pending owner approval.
+Dependencies and embedded fonts retain their own licenses.

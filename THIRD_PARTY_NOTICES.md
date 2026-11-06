@@ -1,8 +1,10 @@
 # Third-party notices
 
 These notices apply to dependencies, adapted code and bundled assets. They do
-not select a license for Byakugan's original source. The release ZIP includes
-the complete license texts under `third_party/licenses/`.
+not replace the [MIT License](LICENSE) for Byakugan's original source and
+documentation. That MIT grant does not relicense third-party material, including
+the fonts, GSAP and demo audio listed below. The release ZIP includes the
+complete dependency license texts under `third_party/licenses/`.
 
 | Material | Copyright / source | License text |
 | --- | --- | --- |

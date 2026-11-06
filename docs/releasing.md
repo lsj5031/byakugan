@@ -1,9 +1,9 @@
 # Windows preview releases
 
-The first binary is a preview, not a stable-release claim. Public visibility
-and the license for Byakugan's original source require the owner's decision.
-Third-party licenses remain separate. Do not switch visibility until the
-source/history/media disclosure review is accepted.
+The first binary is a preview, not a stable-release claim. Byakugan's original
+source and documentation are MIT licensed; third-party licenses remain separate.
+The source, reachable history and media have been reviewed for public release.
+See the README and third-party notices for the licensing scope.
 
 ## Build and verify
 
@@ -32,8 +32,9 @@ cleanup and privilege-transition test on a disposable Windows installation.
 Output is under `artifacts/release/`: a versioned ZIP, `.zip.sha256`, a public
 build manifest, and separate evidence logs/captures. Existing ZIPs are not
 overwritten; pass `--output` with a new directory for another attempt. Only the
-two executables, quick-start text, build manifest and dependency notices enter
-the ZIP. PDBs, screenshots, logs, source paths and demo music are not packaged.
+two executables, quick-start text, build manifest, MIT license and dependency
+notices enter the ZIP. PDBs, screenshots, logs, source paths and demo music are
+not packaged.
 
 ## Automated checks
 

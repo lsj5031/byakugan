@@ -183,6 +183,9 @@ the [SIL Open Font License](src/fonts/LICENSE.txt). The Partition mark is the ap
 shared header, window and executable identity. Demo music: Sascha Ende,
 [ende.app](https://ende.app/en), CC BY 4.0; [full media credits](docs/demo/README.md).
 
-See [third-party notices](THIRD_PARTY_NOTICES.md) for dependency and adapted-code
-licenses. A license for Byakugan's original source is pending owner approval;
-the third-party notices do not grant a blanket license to this repository.
+## License
+
+Byakugan's original source and documentation are licensed under the [MIT License](LICENSE).
+Dependencies, adapted code, fonts and demo media retain their own licenses;
+MIT does not replace those terms. See [third-party notices](THIRD_PARTY_NOTICES.md)
+and [demo credits](docs/demo/README.md), including the separate GSAP and audio terms.
