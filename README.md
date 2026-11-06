@@ -34,10 +34,26 @@ cleanup fixture. No files were recycled during filming. Made with
 
 Screenshots use the built-in synthetic demo, not a scan of a user's files.
 
+## Windows preview
+
+The portable x64 package is attached to the [preview release](https://github.com/lsj5031/byakugan/releases).
+Extract the complete ZIP and run `byakugan.exe`; `byakugan-cli.exe` is included.
+No installer or Zig toolchain is needed. Compare `Get-FileHash <zip> -Algorithm
+SHA256` with the accompanying `.zip.sha256` file before running it.
+
+This is an **unsigned preview**, tested on Windows 11 x64. Windows may display
+an unknown-publisher or SmartScreen warning. Real successful recycling, partial
+failures and alternate-account privilege transitions still need manual validation;
+automated checks do not establish those outcomes. See [release checks and limitations](docs/releasing.md).
+
 ## Build from source
 
 Windows x64, Git, and a Zig **0.17** toolchain are required; this revision was
 tested with Zig **0.17.1**. GUI and CLI binaries are built together.
+
+For a distributable build, use the [release packager](docs/releasing.md): it runs
+the suites with ReleaseSafe and a baseline x64 CPU, strips debug symbols, checks
+the packaged binaries, and includes checksums, provenance and dependency notices.
 
 The current Windows integration needs a small nanoui compatibility patch for
 folder selection and reduced motion. Use the pinned revision below, with both
@@ -166,3 +182,7 @@ Typography is [Recursive Sans Linear](https://www.recursive.design/), bundled un
 the [SIL Open Font License](src/fonts/LICENSE.txt). The Partition mark is the app's
 shared header, window and executable identity. Demo music: Sascha Ende,
 [ende.app](https://ende.app/en), CC BY 4.0; [full media credits](docs/demo/README.md).
+
+See [third-party notices](THIRD_PARTY_NOTICES.md) for dependency and adapted-code
+licenses. A license for Byakugan's original source is pending owner approval;
+the third-party notices do not grant a blanket license to this repository.

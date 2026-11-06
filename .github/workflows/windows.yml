@@ -1,0 +1,67 @@
+name: Windows release checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-package:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: byakugan
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: byakugan
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: lsj5031/nanoui
+          ref: 7d4424b1046f8bbab365b42f61d00f1934d4dcc8
+          path: nanoui
+          persist-credentials: false
+      - name: Apply pinned Windows integration
+        run: |
+          git -C ../nanoui apply --check ../byakugan/tools/nanoui-windows.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C ../nanoui apply ../byakugan/tools/nanoui-windows.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install verified Zig 0.17.1
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'zig.zip'
+          Invoke-WebRequest 'https://ziglang.org/download/0.17.1/zig-x86_64-windows-0.17.1.zip' -OutFile $archive
+          $expected = 'b03f477a1943673e02aca0f570e8030dffd536ce1f45cbc4d3326ec31159562e'
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+            throw 'Zig archive checksum mismatch'
+          }
+          Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
+          Join-Path $env:RUNNER_TEMP 'zig-x86_64-windows-0.17.1' | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Test, build and smoke-test portable package
+        run: python -X utf8 tools/package_release.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: byakugan-windows-x86_64
+          path: |
+            byakugan/artifacts/release/*.zip
+            byakugan/artifacts/release/*.sha256
+            byakugan/artifacts/release/*.build-info.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-test-evidence
+          path: byakugan/artifacts/release/*-evidence/
+          if-no-files-found: warn
+          retention-days: 14

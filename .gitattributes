@@ -1,0 +1,4 @@
+# Zig's formatter expects LF, including in fresh Windows checkouts.
+*.zig text eol=lf
+*.zon text eol=lf
+*.patch text eol=lf

@@ -1,6 +1,6 @@
 .{
     .name = .byakugan,
-    .version = "0.1.0",
+    .version = "0.1.0-preview.1",
     .fingerprint = 0x64c3ec4641269661,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
@@ -10,5 +10,7 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "THIRD_PARTY_NOTICES.md",
+        "third_party",
     },
 }

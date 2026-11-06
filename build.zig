@@ -3,10 +3,13 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const strip = b.option(bool, "strip", "Omit executable debug symbols") orelse false;
     // Offscreen tests save captures here, including on a fresh checkout.
     b.root.createDirPath(b.graph.io, "artifacts") catch |err|
         std.debug.panic("cannot create screenshot directory: {s}", .{@errorName(err)});
 
+    const app_options = b.addOptions();
+    app_options.addOption([]const u8, "version", @import("build.zig.zon").version);
     const lib = b.addModule("byakugan", .{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
@@ -21,9 +24,11 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
+            .strip = strip,
             .imports = &.{.{ .name = "byakugan", .module = lib }},
         }),
     });
+    cli.root_module.addOptions("app_options", app_options);
     b.installArtifact(cli);
     const run_cli = b.addRunArtifact(cli);
     run_cli.addPassthruArgs();
@@ -31,8 +36,6 @@ pub fn build(b: *std.Build) void {
 
     const nanoui_dep = b.dependency("nanoui", .{ .target = target, .optimize = optimize });
     const nanoui = nanoui_dep.module("nanoui");
-    const app_options = b.addOptions();
-    app_options.addOption([]const u8, "version", @import("build.zig.zon").version);
     const gui = b.addExecutable(.{
         .name = "byakugan",
         .root_module = b.createModule(.{
@@ -40,6 +43,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
+            .strip = strip,
             .imports = &.{
                 .{ .name = "nanoui", .module = nanoui },
                 .{ .name = "byakugan", .module = lib },

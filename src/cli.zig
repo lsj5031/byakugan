@@ -7,7 +7,7 @@ const folder_scan = by.folder_scan;
 const volume = by.volume;
 const model = by.model;
 
-const version = "0.1.0";
+const version = @import("app_options").version;
 
 const Ctx = struct {
     io: std.Io,
@@ -153,8 +153,8 @@ fn printHelp(io: std.Io) !void {
     var buf: [4096]u8 = undefined;
     var out = std.Io.File.stdout().writerStreaming(io, &buf);
     const w = &out.interface;
+    try w.print("byakugan {s} — NTFS MFT disk analyzer\n", .{version});
     try w.writeAll(
-        \\byakugan 0.1.0 — NTFS MFT disk analyzer
         \\
         \\usage: byakugan-cli [VOLUME] [options]
         \\
