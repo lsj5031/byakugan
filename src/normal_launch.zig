@@ -48,6 +48,7 @@ extern "oleaut32" fn SysAllocString([*:0]const u16) callconv(.winapi) ?[*:0]u16;
 extern "oleaut32" fn SysFreeString([*:0]const u16) callconv(.winapi) void;
 extern "kernel32" fn GetModuleFileNameW(?w.HANDLE, [*]u16, u32) callconv(.winapi) u32;
 extern "kernel32" fn OpenProcess(u32, i32, u32) callconv(.winapi) ?w.HANDLE;
+extern "user32" fn GetShellWindow() callconv(.winapi) ?w.HWND;
 extern "user32" fn GetWindowThreadProcessId(w.HWND, *u32) callconv(.winapi) u32;
 extern "advapi32" fn OpenProcessToken(w.HANDLE, u32, *w.HANDLE) callconv(.winapi) i32;
 extern "advapi32" fn GetTokenInformation(w.HANDLE, u32, *anyopaque, u32, *u32) callconv(.winapi) i32;
@@ -181,8 +182,32 @@ test "normal reopen arguments preserve parent and selected folder without shell 
     try std.testing.expectError(error.UnsafePath, parameters(&buf, "C:\\bad\" --demo"));
 }
 
-test "desktop shell can be inspected without executing anything" {
+test "desktop shell inspection accepts a normal shell and rejects an unavailable or elevated shell" {
+    try std.testing.expectEqual(@as(usize, if (@sizeOf(usize) == 8) 24 else 16), @sizeOf(Variant));
+    // CI can run without Explorer or with an elevated desktop. Determine that
+    // independently of the COM lookup; never turn an arbitrary COM error into
+    // a pass or skip on an ordinary unelevated desktop.
+    const hwnd = GetShellWindow() orelse {
+        std.debug.print("desktop shell absent: expecting safe rejection\n", .{});
+        try std.testing.expectError(error.NoDesktopShell, Desktop.init());
+        return;
+    };
+    var pid: u32 = 0;
+    try std.testing.expect(GetWindowThreadProcessId(hwnd, &pid) != 0);
+    const process = OpenProcess(0x1000, 0, pid) orelse return error.ShellProcessInspectionFailed;
+    defer w.CloseHandle(process);
+    var token: w.HANDLE = undefined;
+    try std.testing.expect(OpenProcessToken(process, 8, &token) != 0);
+    defer w.CloseHandle(token);
+    var elevated: u32 = 1;
+    var returned: u32 = 0;
+    try std.testing.expect(GetTokenInformation(token, 20, &elevated, @sizeOf(u32), &returned) != 0);
+    try std.testing.expectEqual(@as(u32, @sizeOf(u32)), returned);
+    std.debug.print("desktop shell TokenElevation={}: expecting {s}\n", .{ elevated != 0, if (elevated != 0) "safe rejection" else "successful inspection" });
+    if (elevated != 0) {
+        try std.testing.expectError(error.NoDesktopShell, Desktop.init());
+        return;
+    }
     const desktop = try Desktop.init();
     defer desktop.deinit();
-    try std.testing.expectEqual(@as(usize, if (@sizeOf(usize) == 8) 24 else 16), @sizeOf(Variant));
 }
